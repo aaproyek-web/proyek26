@@ -1014,42 +1014,66 @@ function waSlip(i){
   if(r.lembur) L.push("Lembur: "+rupiah(r.lembur));
   if(r.tambahan) L.push("Tambahan: "+rupiah(r.tambahan));
   if(r.kasbon) L.push("Potongan kasbon: -"+rupiah(r.kasbon));
+  if(r.sisa_kasbon!=null && (r.sisa_kasbon-(r.kasbon||0))>0) L.push("Sisa kasbon: "+rupiah(r.sisa_kasbon-(r.kasbon||0)));
   L.push("-------------------","*TOTAL: "+rupiah(r.gaji_bersih)+"*","","Terima kasih.");
   window.open("https://wa.me/"+phone+"?text="+encodeURIComponent(L.join("\n")),"_blank");
 }
 async function buildPreview(){
   const mulai=payPeriod.mulai, selesai=payPeriod.selesai;
   if(!mulai||!selesai||mulai>selesai){ toast("Periode tidak valid","err"); return; }
-  const [absR,kompR,ksbR]=await Promise.all([
+  const [absR,kompR,ksbR,dedR]=await Promise.all([
     sb.from("absensi").select("tukang_id,status").gte("tanggal",mulai).lte("tanggal",selesai),
     sb.from("gaji_komponen").select("id,tukang_id,jenis,jumlah").is("payroll_id",null).gte("tanggal",mulai).lte("tanggal",selesai),
-    sb.from("transaksi").select("id,tukang_id,jumlah").eq("kategori","kasbon").eq("status","aktif").is("payroll_id",null).gte("tanggal",mulai).lte("tanggal",selesai)
+    sb.from("transaksi").select("tukang_id,jumlah").eq("kategori","kasbon").eq("status","aktif"),
+    sb.from("payroll_detail").select("tukang_id,kasbon").gt("kasbon",0)
   ]);
-  const abs=absR.data||[], komp=kompR.data||[], ksb=ksbR.data||[];
-  const map={}; const G=id=>{ if(!map[id]) map[id]={penuh:0,setengah:0,lembur:0,tambahan:0,kasbon:0}; return map[id]; };
+  const abs=absR.data||[], komp=kompR.data||[];
+  // hutang kasbon berjalan = semua kasbon aktif − semua potongan slip sebelumnya
+  const hutang={};
+  (ksbR.data||[]).forEach(t=>{ if(t.tukang_id) hutang[t.tukang_id]=(hutang[t.tukang_id]||0)+(Number(t.jumlah)||0); });
+  (dedR.data||[]).forEach(d=>{ if(d.tukang_id) hutang[d.tukang_id]=(hutang[d.tukang_id]||0)-(Number(d.kasbon)||0); });
+  const map={}; const G=id=>{ if(!map[id]) map[id]={penuh:0,setengah:0,lembur:0,tambahan:0}; return map[id]; };
   abs.forEach(a=>{ if(a.status==="penuh")G(a.tukang_id).penuh++; else if(a.status==="setengah")G(a.tukang_id).setengah++; });
-  const kompIds=[], kasbonIds=[];
+  const kompIds=[];
   komp.forEach(k=>{ const x=G(k.tukang_id); if(k.jenis==="lembur")x.lembur+=Number(k.jumlah)||0; else x.tambahan+=Number(k.jumlah)||0; kompIds.push(k.id); });
-  ksb.forEach(t=>{ if(!t.tukang_id) return; G(t.tukang_id).kasbon+=Number(t.jumlah)||0; kasbonIds.push(t.id); });
   const rows=[];
   for(const id in map){ const a=map[id]; const tk=dataTukang.find(x=>x.id===id); const tarif=tk?Number(tk.tarif_harian)||0:0;
-    const upah=Math.round((a.penuh+0.5*a.setengah)*tarif); const bersih=upah+a.lembur+a.tambahan-a.kasbon;
-    rows.push({tukang_id:id,nama:tk?tk.nama:"(tukang)",no_hp:tk?tk.no_hp:"",tarif_harian:tarif,hari_penuh:a.penuh,hari_setengah:a.setengah,upah_dasar:upah,lembur:a.lembur,tambahan:a.tambahan,kasbon:a.kasbon,gaji_bersih:bersih}); }
+    const upah=Math.round((a.penuh+0.5*a.setengah)*tarif);
+    const bruto=upah+a.lembur+a.tambahan;
+    const sisa=Math.max(0,Math.round(hutang[id]||0));
+    const potong=Math.min(sisa,bruto);           // default: potong sebisanya, bisa diedit manual
+    rows.push({tukang_id:id,nama:tk?tk.nama:"(tukang)",no_hp:tk?tk.no_hp:"",tarif_harian:tarif,hari_penuh:a.penuh,hari_setengah:a.setengah,upah_dasar:upah,lembur:a.lembur,tambahan:a.tambahan,sisa_kasbon:sisa,kasbon:potong,gaji_bersih:bruto-potong}); }
   rows.sort((x,y)=>(x.nama||"").localeCompare(y.nama||""));
   const totalKotor=rows.reduce((s,r)=>s+r.upah_dasar+r.lembur+r.tambahan,0);
   const totalKasbon=rows.reduce((s,r)=>s+r.kasbon,0);
   const totalBersih=rows.reduce((s,r)=>s+r.gaji_bersih,0);
-  payPreview={mulai,selesai,rows,totalKotor,totalKasbon,totalBersih,kompIds,kasbonIds};
+  payPreview={mulai,selesai,rows,totalKotor,totalKasbon,totalBersih,kompIds};
   renderSlip();
+}
+function setKasbonRow(i,el){
+  const r=payPreview&&payPreview.rows[i]; if(!r) return;
+  let v=parseInt((el.value||"").replace(/[^0-9]/g,"")||"0",10);
+  if(v>r.sisa_kasbon){ v=r.sisa_kasbon; el.value=String(v); }
+  r.kasbon=v;
+  r.gaji_bersih=r.upah_dasar+r.lembur+r.tambahan-v;
+  const b=$("sb-"+i); if(b) b.textContent=rupiah(r.gaji_bersih);
+  const h=$("ksh-"+i); if(h) h.textContent="= "+rupiah(v)+" · sisa hutang jadi "+rupiah(r.sisa_kasbon-v);
+  payPreview.totalKasbon=payPreview.rows.reduce((s,x)=>s+x.kasbon,0);
+  payPreview.totalBersih=payPreview.rows.reduce((s,x)=>s+x.gaji_bersih,0);
+  const tv=$("tot-bersih"); if(tv) tv.textContent=rupiah(payPreview.totalBersih);
+  const ts=$("tot-sub"); if(ts) ts.textContent=payPreview.rows.length+" tukang · bruto "+rupiah(payPreview.totalKotor)+" · potong kasbon "+rupiah(payPreview.totalKasbon);
 }
 function slipCard(r,i){
   return `<div class="card" style="margin-bottom:8px;padding:13px 14px">
     <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px">
       <div style="min-width:0"><div style="font-weight:700">${esc(r.nama)}</div>
         <div style="font-size:12px;color:var(--muted);margin-top:2px">${r.hari_penuh} penuh${r.hari_setengah?` + ${r.hari_setengah} ½`:""} · upah ${rupiah(r.upah_dasar)}</div>
-        <div style="font-size:12px;color:var(--muted);margin-top:1px">${r.lembur?`Lembur ${rupiah(r.lembur)} · `:""}${r.tambahan?`Tambahan ${rupiah(r.tambahan)} · `:""}${r.kasbon?`Kasbon -${rupiah(r.kasbon)}`:"tanpa kasbon"}</div></div>
-      <div style="text-align:right;white-space:nowrap"><div style="font-weight:800" class="tnum">${rupiah(r.gaji_bersih)}</div></div>
+        <div style="font-size:12px;color:var(--muted);margin-top:1px">${r.lembur?`Lembur ${rupiah(r.lembur)} · `:""}${r.tambahan?`Tambahan ${rupiah(r.tambahan)} · `:""}${r.sisa_kasbon?`<span class="due">Hutang kasbon ${rupiah(r.sisa_kasbon)}</span>`:"tanpa kasbon"}</div></div>
+      <div style="text-align:right;white-space:nowrap"><div style="font-weight:800" class="tnum" id="sb-${i}">${rupiah(r.gaji_bersih)}</div></div>
     </div>
+    ${r.sisa_kasbon?`<div class="field" style="margin:10px 0 0"><label>Potongan kasbon minggu ini</label>
+      <input type="text" inputmode="numeric" value="${r.kasbon}" oninput="this.value=this.value.replace(/[^0-9]/g,'');setKasbonRow(${i},this)">
+      <div class="hint" id="ksh-${i}">= ${rupiah(r.kasbon)} · sisa hutang jadi ${rupiah(r.sisa_kasbon-r.kasbon)}</div></div>`:""}
     ${r.no_hp?`<button class="btn ghost sm block" style="margin-top:10px" onclick="waSlip(${i})">Kirim slip WA</button>`:`<div style="font-size:11px;color:var(--muted);margin-top:8px">No HP belum diisi — tidak bisa kirim WA</div>`}</div>`;
 }
 async function renderSlip(){
@@ -1059,7 +1083,7 @@ async function renderSlip(){
   if(payPreview && payPreview.mulai===payPeriod.mulai && payPreview.selesai===payPeriod.selesai){
     if(payPreview.rows.length){
       currentSlip={rows:payPreview.rows,mulai:payPreview.mulai,selesai:payPreview.selesai};
-      prev=`<div class="bigtotal" style="margin:4px 0 10px"><div class="l">TOTAL GAJI BERSIH</div><div class="v tnum">${rupiah(payPreview.totalBersih)}</div><div class="s">${payPreview.rows.length} tukang · bruto ${rupiah(payPreview.totalKotor)} · kasbon ${rupiah(payPreview.totalKasbon)}</div></div>
+      prev=`<div class="bigtotal" style="margin:4px 0 10px"><div class="l">TOTAL GAJI BERSIH</div><div class="v tnum" id="tot-bersih">${rupiah(payPreview.totalBersih)}</div><div class="s" id="tot-sub">${payPreview.rows.length} tukang · bruto ${rupiah(payPreview.totalKotor)} · potong kasbon ${rupiah(payPreview.totalKasbon)}</div></div>
         <div class="actions"><button class="btn primary" onclick="openFinalisasi()">Finalisasi & bayar</button></div>
         ${payPreview.rows.map((r,i)=>slipCard(r,i)).join("")}`;
     } else { prev=`<div class="empty">Tidak ada data gaji pada periode ini.</div>`; }
@@ -1097,7 +1121,6 @@ async function doFinalisasi(){
   const det=pv.rows.map(r=>({payroll_id:pid,tukang_id:r.tukang_id,nama:r.nama,no_hp:r.no_hp,tarif_harian:r.tarif_harian,hari_penuh:r.hari_penuh,hari_setengah:r.hari_setengah,upah_dasar:r.upah_dasar,lembur:r.lembur,tambahan:r.tambahan,kasbon:r.kasbon,gaji_bersih:r.gaji_bersih}));
   const e2=(await sb.from("payroll_detail").insert(det)).error; if(e2) console.log(e2);
   if(pv.kompIds.length) await sb.from("gaji_komponen").update({payroll_id:pid}).in("id",pv.kompIds);
-  if(pv.kasbonIds.length) await sb.from("transaksi").update({payroll_id:pid}).in("id",pv.kasbonIds);
   await sb.from("transaksi").insert({tanggal:tgl,tipe:"keluar",akun,kategori:"gaji",jumlah:pv.totalBersih,payroll_id:pid,keterangan:"Gaji "+fmtTgl(pv.mulai)+" - "+fmtTgl(pv.selesai),dibuat_oleh:me.id});
   payPreview=null; closeModal(); toast("Slip gaji difinalisasi & dibayar","ok");
   await Promise.all([loadTx(),loadKomp(),loadPayroll()]); renderGaji();
@@ -1139,7 +1162,9 @@ async function buildLaporan(){
   let det=[]; if(prIds.length){ const r=await sb.from("payroll_detail").select("*").in("payroll_id",prIds); det=r.data||[]; }
   const { data:tx }=await sb.from("transaksi").select("*").gte("tanggal",a).lte("tanggal",b);
   const { data:prev }=await sb.from("transaksi").select("tipe,akun,jumlah").eq("status","aktif").lt("tanggal",a);
-  repData={ a,b, details:det, tx:tx||[], prev:prev||[] };
+  const { data:kasbonAll }=await sb.from("transaksi").select("tukang_id,jumlah").eq("kategori","kasbon").eq("status","aktif");
+  const { data:dedAll }=await sb.from("payroll_detail").select("tukang_id,kasbon").gt("kasbon",0);
+  repData={ a,b, details:det, tx:tx||[], prev:prev||[], kasbonAll:kasbonAll||[], dedAll:dedAll||[] };
   renderLaporanBody();
 }
 function renderLaporanBody(){
@@ -1178,13 +1203,19 @@ function repTxLine(t){
 }
 function repKasbon(){
   const ks=repData.tx.filter(t=>t.kategori==="kasbon"&&t.status==="aktif");
-  if(!ks.length) return `<div class="empty">Tidak ada kasbon pada periode ini.</div>`;
+  const out={};
+  (repData.kasbonAll||[]).forEach(t=>{ if(t.tukang_id) out[t.tukang_id]=(out[t.tukang_id]||0)+(Number(t.jumlah)||0); });
+  (repData.dedAll||[]).forEach(d=>{ if(d.tukang_id) out[d.tukang_id]=(out[d.tukang_id]||0)-(Number(d.kasbon)||0); });
   const map={};
-  ks.forEach(t=>{ const k=t.tukang_id||"-"; if(!map[k])map[k]={nama:t.tukang_id?namaTukang(t.tukang_id):"(tanpa tukang)",total:0,outstanding:0,n:0}; const m=map[k]; const j=Number(t.jumlah)||0; m.total+=j; m.n++; if(!t.payroll_id) m.outstanding+=j; });
-  const rows=Object.values(map).sort((a,b)=>b.total-a.total);
-  let gT=0,gO=0;
-  const body=rows.map(r=>{ gT+=r.total; gO+=r.outstanding; return `<div class="tx"><div class="l"><div class="k">${esc(r.nama)}</div><div class="d">${r.n}x · ${r.outstanding?`<span class="due">belum dipotong ${rupiah(r.outstanding)}</span>`:"sudah masuk slip"}</div></div><div class="r"><div class="a tnum">${rupiah(r.total)}</div></div></div>`; }).join("");
-  return `<div class="bigtotal"><div class="l">TOTAL KASBON TUKANG</div><div class="v tnum">${rupiah(gT)}</div><div class="s">Belum dipotong slip: ${rupiah(gO)}</div></div><div class="list" style="margin-top:8px">${body}</div>`;
+  const G=k=>{ if(!map[k])map[k]={nama:k!=="-"?namaTukang(k):"(tanpa tukang)",ambil:0,n:0,sisa:0}; return map[k]; };
+  ks.forEach(t=>{ const k=t.tukang_id||"-"; const m=G(k); m.ambil+=Number(t.jumlah)||0; m.n++; });
+  Object.keys(out).forEach(k=>{ if(out[k]>0) G(k).sisa=Math.round(out[k]); });
+  const rows=Object.values(map).sort((a,b)=>b.sisa-a.sisa||b.ambil-a.ambil);
+  if(!rows.length) return `<div class="empty">Tidak ada kasbon.</div>`;
+  let gA=0,gS=0;
+  const body=rows.map(r=>{ gA+=r.ambil; gS+=r.sisa;
+    return `<div class="tx"><div class="l"><div class="k">${esc(r.nama)}</div><div class="d">Diambil periode ini: ${r.ambil?rupiah(r.ambil)+(r.n?` (${r.n}x)`:""):"–"}</div></div><div class="r"><div class="a tnum ${r.sisa?'due':''}">${r.sisa?("sisa "+rupiah(r.sisa)):"lunas"}</div></div></div>`; }).join("");
+  return `<div class="bigtotal"><div class="l">SISA HUTANG KASBON (BELUM DIPOTONG)</div><div class="v tnum">${rupiah(gS)}</div><div class="s">Diambil pada periode ini: ${rupiah(gA)}</div></div><div class="list" style="margin-top:8px">${body}</div>`;
 }
 function repKas(){
   const aktif=repData.tx.filter(t=>t.status==="aktif");
