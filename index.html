@@ -471,8 +471,8 @@ async function simpanAbsensi(){
 /* ===================== KAS ===================== */
 function renderKas(){
   let actions="";
-  if(me.role==="admin") actions=`<button class="btn primary" onclick="openKasbon()">＋ Kasbon</button><button class="btn ghost" onclick="openMutasi()">Mutasi →</button>`;
-  if(me.role==="manager") actions=`<button class="btn primary" onclick="openModalIncome()">＋ Modal</button><button class="btn ghost" onclick="openMutasi()">Mutasi →</button>`;
+  if(me.role==="admin") actions=`<button class="btn primary" onclick="openKasbon()">＋ Kasbon</button><button class="btn ghost" onclick="openMutasi()">Mutasi →</button><button class="btn ghost" onclick="openBank()">Bank</button>`;
+  if(me.role==="manager") actions=`<button class="btn primary" onclick="openModalIncome()">＋ Modal</button><button class="btn ghost" onclick="openMutasi()">Mutasi →</button><button class="btn ghost" onclick="openBank()">Bank</button>`;
   const reqs=(me.role==="manager")?dataMinta.filter(m=>(m.tipe==="void"||m.tipe==="koreksi")&&m.status==="diajukan"):[];
   const list=dataTx.map(txItem).join("");
   getSaldo().then(s=>{
@@ -487,13 +487,13 @@ function renderKas(){
 }
 function transaksiTitle(t){
   const nm=t.tukang_id?namaTukang(t.tukang_id):(t.supplier_id?namaSupplier(t.supplier_id):"");
-  const kat={modal:"Modal",gaji:"Gaji",kasbon:"Kasbon",material:"Material",lain:"Lainnya"}[t.kategori]||t.kategori;
+  const kat={modal:"Modal",gaji:"Gaji",kasbon:"Kasbon",material:"Material",jasa:"Jasa",bank:"Bank",lain:"Lainnya"}[t.kategori]||t.kategori;
   if(t.tipe==="mutasi") return "Mutasi Rekening → Tunai";
   return kat+(nm?(" · "+nm):"");
 }
 function txItem(t){
   const nm=t.tukang_id?namaTukang(t.tukang_id):(t.supplier_id?namaSupplier(t.supplier_id):"");
-  const kat={modal:"Modal",gaji:"Gaji",kasbon:"Kasbon",material:"Material",lain:"Lainnya"}[t.kategori]||t.kategori;
+  const kat={modal:"Modal",gaji:"Gaji",kasbon:"Kasbon",material:"Material",jasa:"Jasa",bank:"Bank",lain:"Lainnya"}[t.kategori]||t.kategori;
   let title,cls,amt,chips;
   if(t.tipe==="mutasi"){ title="Mutasi"; cls="amt-mut"; amt=rupiah(t.jumlah); chips=`<span class="chip">Rekening → Tunai</span>`; }
   else if(t.tipe==="masuk"){ title=kat; cls="amt-pos"; amt="+ "+rupiah(t.jumlah); chips=`<span class="chip">${t.akun==='tunai'?'Tunai':'Rekening'}</span>`; }
@@ -657,6 +657,25 @@ async function simpanMutasi(){
   closeModal(); toast("Mutasi berhasil","ok"); await loadTx(); renderKas();
 }
 
+/* --- biaya & bunga bank --- */
+function openBank(){
+  openModal("Biaya / Bunga Bank",`
+    <div class="field"><label>Jenis</label><select id="bk-jenis"><option value="keluar">Biaya bank (keluar) — admin, transfer, pajak</option><option value="masuk">Bunga bank (masuk)</option></select></div>
+    <div class="field"><label>Akun</label><select id="bk-akun"><option value="rekening">Kas Rekening</option><option value="tunai">Kas Tunai</option></select></div>
+    <div class="field"><label>Jumlah (Rp)</label><input id="bk-jumlah" class="num" data-num="int" data-hint="bk-hint" type="text" inputmode="numeric" placeholder="0"><div class="hint" id="bk-hint"></div></div>
+    <div class="field"><label>Tanggal</label><input id="bk-tgl" type="date" value="${todayStr()}"></div>
+    <div class="field"><label>Keterangan</label><input id="bk-ket" type="text" placeholder="cth: admin bulanan / bunga tabungan"></div>`,
+    `<button class="btn ghost" onclick="closeModal()">Batal</button><button class="btn primary" onclick="simpanBank()">Simpan</button>`);
+}
+async function simpanBank(){
+  const jumlah=numVal($("bk-jumlah")); if(jumlah<=0){ toast("Jumlah harus > 0","err"); return; }
+  const tipe=$("bk-jenis").value;
+  const payload={tanggal:$("bk-tgl").value||todayStr(),tipe,akun:$("bk-akun").value,kategori:"bank",jumlah,keterangan:$("bk-ket").value.trim()||(tipe==="keluar"?"Biaya admin bank":"Bunga bank"),dibuat_oleh:me.id};
+  const { error }=await sb.from("transaksi").insert(payload);
+  if(error){ console.log(error); toast("Gagal menyimpan","err"); return; }
+  closeModal(); toast(tipe==="keluar"?"Biaya bank tercatat":"Bunga bank tercatat","ok"); await loadTx(); renderKas();
+}
+
 /* ===================== PEMBELIAN (admin + manager) ===================== */
 function beliBadge(p){
   let txt,bg,fg;
@@ -674,7 +693,7 @@ function tempoStr(p){
 function beliLine(p){
   const sup=p.supplier_id?namaSupplier(p.supplier_id):"-";
   const sub=p.harga_satuan? `${p.qty||0} ${esc(p.satuan||"")} × ${rupiah(p.harga_satuan)} = ${rupiah(p.total)}` : `${p.qty||0} ${esc(p.satuan||"")}`;
-  return `<div class="tx"><div class="l"><div class="k">${esc(p.item)}</div><div class="d">${esc(sup)} · ${sub}${tempoStr(p)}</div><div style="margin-top:6px">${beliBadge(p)}</div>${p.status==="ditolak"&&p.alasan_tolak?`<div class="d" style="color:var(--neg);margin-top:4px">Alasan: ${esc(p.alasan_tolak)}</div>`:""}</div></div>`;
+  return `<div class="tx"><div class="l"><div class="k">${esc(p.item)}</div><div class="d">${p.jenis==='jasa'?'Jasa · ':''}${esc(sup)} · ${sub}${tempoStr(p)}</div><div style="margin-top:6px">${beliBadge(p)}</div>${p.status==="ditolak"&&p.alasan_tolak?`<div class="d" style="color:var(--neg);margin-top:4px">Alasan: ${esc(p.alasan_tolak)}</div>`:""}</div></div>`;
 }
 function actionCard(p,type){
   const sup=p.supplier_id?namaSupplier(p.supplier_id):"-";
@@ -682,13 +701,13 @@ function actionCard(p,type){
   if(type==="proses") btn=`<button class="btn primary sm" onclick="openProses('${p.id}')">Proses</button>`;
   if(type==="bayar") btn=`<button class="btn primary sm" onclick="openBayar('${p.id}')">Bayar</button>`;
   const sub=p.harga_satuan? `${p.qty||0} ${esc(p.satuan||"")} × ${rupiah(p.harga_satuan)} = ${rupiah(p.total)}` : `${p.qty||0} ${esc(p.satuan||"")}`;
-  return `<div class="tx"><div class="l"><div class="k">${esc(p.item)}</div><div class="d">${esc(sup)} · ${sub}${tempoStr(p)}</div></div><div class="r">${btn}</div></div>`;
+  return `<div class="tx"><div class="l"><div class="k">${esc(p.item)}</div><div class="d">${p.jenis==='jasa'?'Jasa · ':''}${esc(sup)} · ${sub}${tempoStr(p)}</div></div><div class="r">${btn}</div></div>`;
 }
 function approveCard(p){
   const sup=p.supplier_id?namaSupplier(p.supplier_id):"-";
   const sub=`${p.qty||0} ${esc(p.satuan||"")} × ${rupiah(p.harga_satuan)} = ${rupiah(p.total)}`;
   return `<div class="card" style="margin-bottom:10px"><div style="font-weight:700;font-size:15px">${esc(p.item)}</div>
-    <div style="font-size:13px;color:var(--muted);margin:4px 0 2px">${esc(sup)}</div>
+    <div style="font-size:13px;color:var(--muted);margin:4px 0 2px">${p.jenis==='jasa'?'Jasa · ':''}${esc(sup)}</div>
     <div style="font-size:14px;font-weight:700">${sub}</div>
     ${p.catatan?`<div style="font-size:13px;color:#475569;margin-top:6px">“${esc(p.catatan)}”</div>`:""}
     <div style="font-size:12px;color:var(--muted);margin-top:5px">${p.tipe==='barang_dulu'?'Barang sudah datang':'Pengajuan'} · ${fmtTgl(p.tgl_pengajuan)}${p.jatuh_tempo?(" · tempo "+fmtTgl(p.jatuh_tempo)):""}</div>
@@ -737,7 +756,8 @@ function renderPembelian(){
 function openAjukan(){
   const opts=supplierOptions();
   if(!opts){ toast("Tambahkan supplier dulu di menu Data","err"); return; }
-  openModal("Ajukan Pembelian",`
+  openModal("Ajukan Pembelian / Jasa",`
+    <div class="field"><label>Jenis</label><select id="aj-jenis"><option value="barang">Barang / material</option><option value="jasa">Jasa / tukang lepas (tanpa barang datang)</option></select></div>
     <div class="field"><label>Supplier</label><select id="aj-sup">${opts}</select></div>
     <div class="field"><label>Nama barang</label><input id="aj-item" type="text" placeholder="cth: Semen Tiga Roda"></div>
     <div class="field-2"><div class="field"><label>Jumlah</label><input id="aj-qty" class="num" data-num="dec" type="text" inputmode="decimal" placeholder="0"></div><div class="field"><label>Satuan</label><input id="aj-satuan" type="text" placeholder="sak / batang"></div></div>
@@ -750,7 +770,8 @@ async function simpanAjukan(){
   const item=$("aj-item").value.trim(), qty=decVal($("aj-qty")), harga=numVal($("aj-harga"));
   if(!item){ toast("Nama barang wajib","err"); return; }
   if(qty<=0||harga<=0){ toast("Jumlah & harga harus > 0","err"); return; }
-  const payload={tipe:"pengajuan_dulu",status:"diajukan",supplier_id:$("aj-sup").value,item,qty,satuan:$("aj-satuan").value.trim(),harga_satuan:harga,total:Math.round(qty*harga),tgl_pengajuan:$("aj-tgl").value||todayStr(),jatuh_tempo:$("aj-tempo").value||null,catatan:$("aj-ket").value.trim(),diajukan_oleh:me.id,sudah_datang:false};
+  const jenis=$("aj-jenis").value, tglA=$("aj-tgl").value||todayStr();
+  const payload={tipe:"pengajuan_dulu",status:"diajukan",jenis,supplier_id:$("aj-sup").value,item,qty,satuan:$("aj-satuan").value.trim(),harga_satuan:harga,total:Math.round(qty*harga),tgl_pengajuan:tglA,jatuh_tempo:$("aj-tempo").value||null,catatan:$("aj-ket").value.trim(),diajukan_oleh:me.id,sudah_datang:jenis==="jasa",tgl_datang:jenis==="jasa"?tglA:null,qty_datang:jenis==="jasa"?qty:null};
   const { error }=await sb.from("pembelian").insert(payload);
   if(error){ console.log(error); toast("Gagal mengajukan","err"); return; }
   closeModal(); toast("Pengajuan terkirim ke manager","ok"); await loadBeli(); renderPembelian();
@@ -760,6 +781,7 @@ function openBeliLangsung(){
   if(!opts){ toast("Tambahkan supplier dulu di menu Data","err"); return; }
   openModal("Beli Langsung",`
     <p style="font-size:13px;color:var(--muted);margin:0 0 12px">Pembelian oleh manager langsung disetujui. Isi tempo bila ngutang, kosongkan bila langsung bayar.</p>
+    <div class="field"><label>Jenis</label><select id="bl-jenis"><option value="barang">Barang / material</option><option value="jasa">Jasa / tukang lepas</option></select></div>
     <div class="field"><label>Supplier</label><select id="bl-sup">${opts}</select></div>
     <div class="field"><label>Nama barang</label><input id="bl-item" type="text" placeholder="cth: Semen"></div>
     <div class="field-2"><div class="field"><label>Jumlah</label><input id="bl-qty" class="num" data-num="dec" type="text" inputmode="decimal" placeholder="0"></div><div class="field"><label>Satuan</label><input id="bl-satuan" type="text" placeholder="sak"></div></div>
@@ -772,8 +794,9 @@ async function simpanBeliLangsung(){
   const item=$("bl-item").value.trim(), qty=decVal($("bl-qty")), harga=numVal($("bl-harga"));
   if(!item){ toast("Nama barang wajib","err"); return; }
   if(qty<=0||harga<=0){ toast("Jumlah & harga harus > 0","err"); return; }
-  const datang=$("bl-datang").checked, tgl=$("bl-tgl").value||todayStr();
-  const payload={tipe:"pengajuan_dulu",status:"disetujui",supplier_id:$("bl-sup").value,item,qty,satuan:$("bl-satuan").value.trim(),harga_satuan:harga,total:Math.round(qty*harga),tgl_pengajuan:tgl,jatuh_tempo:$("bl-tempo").value||null,sudah_datang:datang,qty_datang:datang?qty:null,tgl_datang:datang?tgl:null,diajukan_oleh:me.id,disetujui_oleh:me.id};
+  const jenis=$("bl-jenis").value;
+  const datang=jenis==="jasa"?true:$("bl-datang").checked, tgl=$("bl-tgl").value||todayStr();
+  const payload={tipe:"pengajuan_dulu",status:"disetujui",jenis,supplier_id:$("bl-sup").value,item,qty,satuan:$("bl-satuan").value.trim(),harga_satuan:harga,total:Math.round(qty*harga),tgl_pengajuan:tgl,jatuh_tempo:$("bl-tempo").value||null,sudah_datang:datang,qty_datang:datang?qty:null,tgl_datang:datang?tgl:null,diajukan_oleh:me.id,disetujui_oleh:me.id};
   const { error }=await sb.from("pembelian").insert(payload);
   if(error){ console.log(error); toast("Gagal menyimpan","err"); return; }
   closeModal(); toast("Pembelian dicatat","ok"); await loadBeli(); renderPembelian();
@@ -817,7 +840,7 @@ async function simpanBayar(id){
   if(jumlah<=0){ toast("Jumlah harus > 0","err"); return; }
   const s=await getSaldo();
   if((akun==="tunai"?s.tunai:s.rek)<jumlah){ toast("Saldo "+(akun==="tunai"?"tunai":"rekening")+" tidak cukup","err"); return; }
-  const tx={tanggal:$("by-tgl").value||todayStr(),tipe:"keluar",akun,kategori:"material",jumlah,supplier_id:p.supplier_id,pembelian_id:id,keterangan:p.item,dibuat_oleh:me.id};
+  const tx={tanggal:$("by-tgl").value||todayStr(),tipe:"keluar",akun,kategori:(p.jenis==="jasa"?"jasa":"material"),jumlah,supplier_id:p.supplier_id,pembelian_id:id,keterangan:p.item,dibuat_oleh:me.id};
   const { data:txRow, error:e1 }=await sb.from("transaksi").insert(tx).select().single();
   if(e1){ console.log(e1); toast("Gagal membuat transaksi","err"); return; }
   const { error:e2 }=await sb.from("pembelian").update({sudah_dibayar:true,transaksi_id:txRow.id,updated_at:nowISO()}).eq("id",id);
@@ -845,7 +868,7 @@ async function simpanBayarSemua(){
   if(!due.length){ toast("Tidak ada nota","err"); return; }
   const s=await getSaldo();
   if((akun==="tunai"?s.tunai:s.rek)<total){ toast("Saldo "+(akun==="tunai"?"tunai":"rekening")+" tidak cukup untuk "+rupiah(total),"err"); return; }
-  const rows=due.map(p=>({tanggal:tgl,tipe:"keluar",akun,kategori:"material",jumlah:Number(p.total)||0,supplier_id:p.supplier_id,pembelian_id:p.id,keterangan:p.item,dibuat_oleh:me.id}));
+  const rows=due.map(p=>({tanggal:tgl,tipe:"keluar",akun,kategori:(p.jenis==="jasa"?"jasa":"material"),jumlah:Number(p.total)||0,supplier_id:p.supplier_id,pembelian_id:p.id,keterangan:p.item,dibuat_oleh:me.id}));
   const { data:txRows, error:e1 }=await sb.from("transaksi").insert(rows).select();
   if(e1){ console.log(e1); toast("Gagal membuat transaksi","err"); return; }
   for(const p of due){ const tx=(txRows||[]).find(t=>t.pembelian_id===p.id); await sb.from("pembelian").update({sudah_dibayar:true,transaksi_id:tx?tx.id:null,updated_at:nowISO()}).eq("id",p.id); }
@@ -904,7 +927,7 @@ async function tolakKas(id){
 /* ===================== BARANG DATANG (security) ===================== */
 function renderBarangDatang(){
   const tunggu=dataBeli.filter(p=>p.status==="disetujui"&&!p.sudah_datang);
-  const riwayat=dataBeli.filter(p=>p.sudah_datang).slice(0,40);
+  const riwayat=dataBeli.filter(p=>p.sudah_datang&&p.jenis!=="jasa").slice(0,40);
   $("view-barangdatang").innerHTML=`
     <div class="page-head"><h2>Barang Datang</h2><button class="btn-add" onclick="openBarangMasuk()">＋ Barang Masuk</button></div>
     <p style="color:var(--muted);font-size:13px;margin:-6px 0 12px">Tandai kedatangan barang yang sudah disetujui, atau catat barang yang datang tanpa pengajuan.</p>
@@ -1183,18 +1206,18 @@ function repTukang(){
   return `<div class="bigtotal"><div class="l">TOTAL UPAH TUKANG (BRUTO)</div><div class="v tnum">${rupiah(tB)}</div><div class="s">Kasbon ${rupiah(tK)} · dibayar bersih ${rupiah(tN)}</div></div><div class="list" style="margin-top:8px">${body}</div>`;
 }
 function repSupplier(){
-  const mat=repData.tx.filter(t=>t.kategori==="material"&&t.status==="aktif");
-  if(!mat.length) return `<div class="empty">Belum ada pembelian material pada periode ini.</div>`;
+  const mat=repData.tx.filter(t=>(t.kategori==="material"||t.kategori==="jasa")&&t.status==="aktif");
+  if(!mat.length) return `<div class="empty">Belum ada pembelian material/jasa pada periode ini.</div>`;
   const map={};
   mat.forEach(t=>{ const k=t.supplier_id||"-"; if(!map[k])map[k]={nama:t.supplier_id?namaSupplier(t.supplier_id):"(tanpa supplier)",total:0,n:0}; map[k].total+=Number(t.jumlah)||0; map[k].n++; });
   const rows=Object.values(map).sort((a,b)=>b.total-a.total);
   let grand=0;
   const body=rows.map(r=>{ grand+=r.total; return `<div class="tx"><div class="l"><div class="k">${esc(r.nama)}</div><div class="d">${r.n} transaksi</div></div><div class="r"><div class="a tnum">${rupiah(r.total)}</div></div></div>`; }).join("");
-  return `<div class="bigtotal"><div class="l">TOTAL MATERIAL</div><div class="v tnum">${rupiah(grand)}</div><div class="s">${rows.length} supplier</div></div><div class="list" style="margin-top:8px">${body}</div>`;
+  return `<div class="bigtotal"><div class="l">TOTAL MATERIAL & JASA</div><div class="v tnum">${rupiah(grand)}</div><div class="s">${rows.length} supplier</div></div><div class="list" style="margin-top:8px">${body}</div>`;
 }
 function repTxLine(t){
   const nm=t.tukang_id?namaTukang(t.tukang_id):(t.supplier_id?namaSupplier(t.supplier_id):"");
-  const kat={modal:"Modal",gaji:"Gaji",kasbon:"Kasbon",material:"Material",lain:"Lainnya"}[t.kategori]||t.kategori;
+  const kat={modal:"Modal",gaji:"Gaji",kasbon:"Kasbon",material:"Material",jasa:"Jasa",bank:"Bank",lain:"Lainnya"}[t.kategori]||t.kategori;
   let title,cls,amt;
   if(t.tipe==="mutasi"){ title="Mutasi → Tunai"; cls="amt-mut"; amt=rupiah(t.jumlah); }
   else if(t.tipe==="masuk"){ title=kat; cls="amt-pos"; amt="+ "+rupiah(t.jumlah); }
@@ -1223,7 +1246,7 @@ function repKas(){
   let mR=0,mT=0,kR=0,kT=0,mut=0; const byKat={};
   aktif.forEach(t=>{ const j=Number(t.jumlah)||0; if(t.tipe==="masuk"){t.akun==="tunai"?mT+=j:mR+=j;} else if(t.tipe==="keluar"){t.akun==="tunai"?kT+=j:kR+=j; byKat[t.kategori]=(byKat[t.kategori]||0)+j;} else if(t.tipe==="mutasi"){mut+=j;} });
   const cR=oR+mR-kR-mut, cT=oT+mT+mut-kT;
-  const katL={modal:"Modal",gaji:"Gaji",kasbon:"Kasbon",material:"Material",lain:"Lainnya"};
+  const katL={modal:"Modal",gaji:"Gaji",kasbon:"Kasbon",material:"Material",jasa:"Jasa",bank:"Bank",lain:"Lainnya"};
   const katRows=Object.keys(byKat).sort((x,y)=>byKat[y]-byKat[x]).map(k=>`<div class="tx"><div class="l"><div class="k">${katL[k]||k}</div></div><div class="r"><div class="a amt-neg">− ${rupiah(byKat[k])}</div></div></div>`).join("");
   const list=aktif.slice().sort((a,b)=> a.tanggal<b.tanggal?1:(a.tanggal>b.tanggal?-1:0)).map(repTxLine).join("");
   const ln=(lbl,val,col)=>`<div style="display:flex;justify-content:space-between;font-size:13px;padding:3px 0"><span style="color:var(--muted)">${lbl}</span><b class="tnum"${col?` style="color:${col}"`:""}>${val}</b></div>`;
@@ -1244,12 +1267,12 @@ function repKas(){
 function laporanText(){
   if(!repData) return "";
   let bruto=0; repData.details.forEach(d=>{ bruto+=(Number(d.upah_dasar)||0)+(Number(d.lembur)||0)+(Number(d.tambahan)||0); });
-  const mat=repData.tx.filter(t=>t.kategori==="material"&&t.status==="aktif");
+  const mat=repData.tx.filter(t=>(t.kategori==="material"||t.kategori==="jasa")&&t.status==="aktif");
   const supMap={}; let matTotal=0; mat.forEach(t=>{ const k=t.supplier_id||"-"; supMap[k]=(supMap[k]||0)+(Number(t.jumlah)||0); matTotal+=Number(t.jumlah)||0; });
-  const L=["*LAPORAN PENGELUARAN*","Proyek Tukang","Periode: "+fmtTgl(repData.a)+" - "+fmtTgl(repData.b),"","UPAH TUKANG: "+rupiah(bruto),"","MATERIAL:"];
+  const L=["*LAPORAN PENGELUARAN*","Proyek Tukang","Periode: "+fmtTgl(repData.a)+" - "+fmtTgl(repData.b),"","UPAH TUKANG: "+rupiah(bruto),"","MATERIAL & JASA:"];
   const keys=Object.keys(supMap); if(!keys.length) L.push("- (tidak ada)");
   keys.forEach(k=>{ L.push("- "+(k!=="-"?namaSupplier(k):"(tanpa supplier)")+": "+rupiah(supMap[k])); });
-  L.push("Subtotal material: "+rupiah(matTotal),"","*TOTAL: "+rupiah(bruto+matTotal)+"*");
+  L.push("Subtotal material & jasa: "+rupiah(matTotal),"","*TOTAL: "+rupiah(bruto+matTotal)+"*");
   return L.join("\n");
 }
 function kirimWaLaporan(){ const t=laporanText(); if(!t){ toast("Tampilkan laporan dulu","err"); return; } window.open("https://wa.me/?text="+encodeURIComponent(t),"_blank"); }
