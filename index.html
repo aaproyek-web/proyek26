@@ -546,6 +546,7 @@ function openKoreksiReq(id){
     ${gajiOnly?`<p style="font-size:13px;color:var(--neg);font-weight:600;margin:0 0 12px">Ini pembayaran slip gaji — hanya bisa diajukan pembatalan (void) utuh. Jika manager setuju: slip dihapus, kasbon kembali jadi hutang, lembur/tambahan terbuka, lalu slip dihitung ulang.</p>`:""}
     <div class="field"><label>Jenis</label><select id="kr-jenis" onchange="toggleKrFields()">${gajiOnly?"":'<option value="koreksi">Koreksi (ubah nominal/tanggal)</option>'}<option value="void">Batalkan (void)</option></select></div>
     <div id="kr-koreksi" style="display:${gajiOnly?"none":"block"}">
+      ${t.tipe!=="mutasi"?`<div class="field"><label>Sumber dana</label><select id="kr-akun"><option value="tunai" ${t.akun==="tunai"?"selected":""}>Kas Tunai</option><option value="rekening" ${t.akun==="rekening"?"selected":""}>Kas Rekening</option></select></div>`:""}
       <div class="field"><label>Nominal baru (Rp)</label><input id="kr-jumlah" class="num" data-num="int" data-hint="kr-hint" type="text" inputmode="numeric" value="${t.jumlah||0}"><div class="hint" id="kr-hint">= ${rupiah(t.jumlah||0)}</div></div>
       <div class="field"><label>Tanggal baru</label><input id="kr-tgl" type="date" value="${t.tanggal||todayStr()}"></div>
       <div class="field"><label>Keterangan baru</label><input id="kr-ket" type="text" value="${esc(t.keterangan||"")}"></div>
@@ -558,7 +559,7 @@ async function simpanKoreksiReq(id){
   const jenis=$("kr-jenis").value, alasan=$("kr-alasan").value.trim();
   let data_koreksi=null;
   if(jenis==="koreksi"){
-    data_koreksi={ jumlah:numVal($("kr-jumlah")), tanggal:$("kr-tgl").value||null, keterangan:$("kr-ket").value.trim() };
+    data_koreksi={ jumlah:numVal($("kr-jumlah")), tanggal:$("kr-tgl").value||null, keterangan:$("kr-ket").value.trim(), akun:($("kr-akun")?$("kr-akun").value:null) };
     if(data_koreksi.jumlah<=0){ toast("Nominal harus > 0","err"); return; }
   }
   const { error }=await sb.from("permintaan").insert({tipe:jenis,transaksi_id:id,alasan,data_koreksi,status:"diajukan",diajukan_oleh:me.id});
@@ -572,7 +573,7 @@ function reqCard(m){
   const title=t?transaksiTitle(t):"Transaksi";
   let detail="";
   if(m.tipe==="void") detail=`<div style="font-size:13px;color:var(--neg);font-weight:700;margin-top:4px">Minta dibatalkan (void)</div>`;
-  else { const d=m.data_koreksi||{}; detail=`<div style="font-size:13px;margin-top:4px">Koreksi → <b>${rupiah(d.jumlah)}</b>${d.tanggal?` · ${fmtTgl(d.tanggal)}`:""}${d.keterangan?` · ${esc(d.keterangan)}`:""}</div>`; }
+  else { const d=m.data_koreksi||{}; detail=`<div style="font-size:13px;margin-top:4px">Koreksi → <b>${rupiah(d.jumlah)}</b>${d.akun?` · <b>${d.akun==="tunai"?"Kas Tunai":"Kas Rekening"}</b>`:""}${d.tanggal?` · ${fmtTgl(d.tanggal)}`:""}${d.keterangan?` · ${esc(d.keterangan)}`:""}</div>`; }
   return `<div class="card" style="margin-bottom:10px"><div style="font-weight:700">${esc(title)}</div>
     <div style="font-size:13px;color:var(--muted)">${t?(fmtTgl(t.tanggal)+" · "+rupiah(t.jumlah)):"(transaksi tidak ditemukan)"}</div>
     ${detail}
@@ -591,6 +592,7 @@ async function setujuiReq(id){
     if(d.jumlah!=null) upd.jumlah=d.jumlah;
     if(d.tanggal) upd.tanggal=d.tanggal;
     if(d.keterangan!=null) upd.keterangan=d.keterangan;
+    if(d.akun==="tunai"||d.akun==="rekening") upd.akun=d.akun;
     if(Object.keys(upd).length) await sb.from("transaksi").update(upd).eq("id",m.transaksi_id);
   }
   await sb.from("permintaan").update({status:"disetujui",ditanggapi_oleh:me.id,responded_at:nowISO()}).eq("id",id);
