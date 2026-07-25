@@ -54,12 +54,13 @@
   .card{background:var(--surface);border-radius:var(--r);box-shadow:var(--shadow);padding:16px}
   .card + .card{margin-top:12px}
 
-  .saldo-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px}
-  .saldo{background:var(--surface);border-radius:var(--r);box-shadow:var(--shadow);padding:14px 16px;overflow:hidden}
-  .saldo .lbl{font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.5px}
-  .saldo .amt{font-size:20px;font-weight:800;margin-top:6px}
+  .saldo-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:14px}
+  .saldo{background:var(--surface);border-radius:var(--r);box-shadow:var(--shadow);padding:11px 10px;overflow:hidden}
+  .saldo .lbl{font-size:10.5px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.3px}
+  .saldo .amt{font-size:15px;font-weight:800;margin-top:5px;word-break:break-word}
   .saldo.rek{border-left:4px solid var(--brand)}
   .saldo.tunai{border-left:4px solid var(--accent)}
+  .saldo.owner{border-left:4px solid #7C3AED}
 
   .welcome h3{margin:0 0 6px;font-size:17px}
   .welcome p{margin:0;color:var(--muted);font-size:14px}
@@ -335,7 +336,7 @@ const ICONS={
   data:'<ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v6c0 1.7 3.6 3 8 3s8-1.3 8-3V5"/><path d="M4 11v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/>'
 };
 const NAV={
-  manager:[{id:"beranda",l:"Beranda"},{id:"pembelian",l:"Beli"},{id:"kas",l:"Kas"},{id:"laporan",l:"Laporan"},{id:"data",l:"Data"}],
+  manager:[{id:"beranda",l:"Beranda"},{id:"pembelian",l:"Beli"},{id:"kas",l:"Kas"},{id:"gaji",l:"Gaji"},{id:"laporan",l:"Laporan"},{id:"data",l:"Data"}],
   admin:[{id:"beranda",l:"Beranda"},{id:"kas",l:"Kas"},{id:"pembelian",l:"Beli"},{id:"gaji",l:"Gaji"},{id:"data",l:"Data"}],
   security:[{id:"beranda",l:"Beranda"},{id:"absensi",l:"Absensi"},{id:"barangdatang",l:"Barang"}]
 };
@@ -398,12 +399,25 @@ async function loadBeli(){ const {data,error}=await sb.from("pembelian").select(
 async function loadMinta(){ const {data,error}=await sb.from("permintaan").select("*").order("created_at",{ascending:false}).limit(100); dataMinta=error?[]:(data||[]); updateNotif(); }
 async function getSaldo(){
   const {data,error}=await sb.from("transaksi").select("tipe,akun,jumlah").eq("status","aktif");
-  let tunai=0,rek=0;
+  let tunai=0,rek=0,owner=0;
   if(!error&&data) for(const t of data){ const j=Number(t.jumlah)||0;
-    if(t.tipe==="masuk"){ t.akun==="tunai"?tunai+=j:rek+=j; }
-    else if(t.tipe==="keluar"){ t.akun==="tunai"?tunai-=j:rek-=j; }
+    if(t.tipe==="masuk"){ if(t.akun==="tunai")tunai+=j; else if(t.akun==="owner")owner+=j; else rek+=j; }
+    else if(t.tipe==="keluar"){ if(t.akun==="tunai")tunai-=j; else if(t.akun==="owner")owner-=j; else rek-=j; }
     else if(t.tipe==="mutasi"){ rek-=j; tunai+=j; } }
-  return { tunai, rek };
+  return { tunai, rek, owner };
+}
+function akunLabel(a){ return a==="tunai"?"Tunai":a==="owner"?"Kas Owner":"Rekening"; }
+async function hutangKasbonMap(){
+  const [keluarR,masukR,dedR]=await Promise.all([
+    sb.from("transaksi").select("tukang_id,jumlah").eq("kategori","kasbon").eq("tipe","keluar").eq("status","aktif"),
+    sb.from("transaksi").select("tukang_id,jumlah").eq("kategori","kasbon").eq("tipe","masuk").eq("status","aktif"),
+    sb.from("payroll_detail").select("tukang_id,kasbon").gt("kasbon",0)
+  ]);
+  const m={};
+  (keluarR.data||[]).forEach(t=>{ if(t.tukang_id) m[t.tukang_id]=(m[t.tukang_id]||0)+(Number(t.jumlah)||0); });
+  (masukR.data||[]).forEach(t=>{ if(t.tukang_id) m[t.tukang_id]=(m[t.tukang_id]||0)-(Number(t.jumlah)||0); });
+  (dedR.data||[]).forEach(d=>{ if(d.tukang_id) m[d.tukang_id]=(m[d.tukang_id]||0)-(Number(d.kasbon)||0); });
+  return m;
 }
 
 /* ===================== helpers pembelian ===================== */
@@ -424,7 +438,7 @@ async function renderBeranda(){
     return;
   }
   const s=await getSaldo();
-  block.innerHTML=`<div class="saldo-grid"><div class="saldo rek"><div class="lbl">Kas Rekening</div><div class="amt tnum">${rupiah(s.rek)}</div></div><div class="saldo tunai"><div class="lbl">Kas Tunai</div><div class="amt tnum">${rupiah(s.tunai)}</div></div></div>`;
+  block.innerHTML=`<div class="saldo-grid"><div class="saldo rek"><div class="lbl">Rekening</div><div class="amt tnum">${rupiah(s.rek)}</div></div><div class="saldo tunai"><div class="lbl">Tunai</div><div class="amt tnum">${rupiah(s.tunai)}</div></div><div class="saldo owner"><div class="lbl">Kas Owner</div><div class="amt tnum">${rupiah(s.owner)}</div></div></div>`;
   let extra="";
   const today=todayStr();
   const due=payables().filter(p=>isDue(p,today));
@@ -480,14 +494,14 @@ async function simpanAbsensi(){
 /* ===================== KAS ===================== */
 function renderKas(){
   let actions="";
-  if(me.role==="admin") actions=`<button class="btn primary" onclick="openKasbon()">＋ Kasbon</button><button class="btn ghost" onclick="openMutasi()">Mutasi →</button><button class="btn ghost" onclick="openBank()">Bank</button>`;
-  if(me.role==="manager") actions=`<button class="btn primary" onclick="openModalIncome()">＋ Modal</button><button class="btn ghost" onclick="openMutasi()">Mutasi →</button><button class="btn ghost" onclick="openBank()">Bank</button>`;
+  if(me.role==="admin") actions=`<button class="btn primary" onclick="openKasbon()">＋ Kasbon</button><button class="btn ghost" onclick="openBayarKasbon()">Bayar Kasbon</button><button class="btn ghost" onclick="openMutasi()">Mutasi →</button><button class="btn ghost" onclick="openBank()">Bank</button>`;
+  if(me.role==="manager") actions=`<button class="btn primary" onclick="openModalIncome()">＋ Modal</button><button class="btn ghost" onclick="openBayarKasbon()">Bayar Kasbon</button><button class="btn ghost" onclick="openMutasi()">Mutasi →</button><button class="btn ghost" onclick="openBank()">Bank</button>`;
   const reqs=(me.role==="manager")?dataMinta.filter(m=>(m.tipe==="void"||m.tipe==="koreksi")&&m.status==="diajukan"):[];
   const list=dataTx.map(txItem).join("");
   getSaldo().then(s=>{
     $("view-kas").innerHTML=`
       <div class="page-head"><h2>Kas & Rekening</h2></div>
-      <div class="saldo-grid"><div class="saldo rek"><div class="lbl">Kas Rekening</div><div class="amt tnum">${rupiah(s.rek)}</div></div><div class="saldo tunai"><div class="lbl">Kas Tunai</div><div class="amt tnum">${rupiah(s.tunai)}</div></div></div>
+      <div class="saldo-grid"><div class="saldo rek"><div class="lbl">Rekening</div><div class="amt tnum">${rupiah(s.rek)}</div></div><div class="saldo tunai"><div class="lbl">Tunai</div><div class="amt tnum">${rupiah(s.tunai)}</div></div><div class="saldo owner"><div class="lbl">Kas Owner</div><div class="amt tnum">${rupiah(s.owner)}</div></div></div>
       ${actions?`<div class="actions">${actions}</div>`:""}
       ${reqs.length?`<h4 class="sec">Permintaan koreksi & void (${reqs.length})</h4>${reqs.map(reqCard).join("")}`:""}
       <h4 class="sec">Transaksi</h4>
@@ -505,8 +519,8 @@ function txItem(t){
   const kat={modal:"Modal",gaji:"Gaji",kasbon:"Kasbon",material:"Material",jasa:"Jasa",bank:"Bank",lain:"Lainnya"}[t.kategori]||t.kategori;
   let title,cls,amt,chips;
   if(t.tipe==="mutasi"){ title="Mutasi"; cls="amt-mut"; amt=rupiah(t.jumlah); chips=`<span class="chip">Rekening → Tunai</span>`; }
-  else if(t.tipe==="masuk"){ title=kat; cls="amt-pos"; amt="+ "+rupiah(t.jumlah); chips=`<span class="chip">${t.akun==='tunai'?'Tunai':'Rekening'}</span>`; }
-  else { title=kat+(nm?(" · "+nm):""); cls="amt-neg"; amt="− "+rupiah(t.jumlah); chips=`<span class="chip">${t.akun==='tunai'?'Tunai':'Rekening'}</span>`; }
+  else if(t.tipe==="masuk"){ title=kat; cls="amt-pos"; amt="+ "+rupiah(t.jumlah); chips=`<span class="chip">${akunLabel(t.akun)}</span>`; }
+  else { title=kat+(nm?(" · "+nm):""); cls="amt-neg"; amt="− "+rupiah(t.jumlah); chips=`<span class="chip">${akunLabel(t.akun)}</span>`; }
   const ket=t.keterangan?(" · "+esc(t.keterangan)):"";
   let act="";
   const eligible = t.status==="aktif" && (!t.payroll_id || t.kategori==="gaji");
@@ -555,7 +569,7 @@ function openKoreksiReq(id){
     ${gajiOnly?`<p style="font-size:13px;color:var(--neg);font-weight:600;margin:0 0 12px">Ini pembayaran slip gaji — hanya bisa diajukan pembatalan (void) utuh. Jika manager setuju: slip dihapus, kasbon kembali jadi hutang, lembur/tambahan terbuka, lalu slip dihitung ulang.</p>`:""}
     <div class="field"><label>Jenis</label><select id="kr-jenis" onchange="toggleKrFields()">${gajiOnly?"":'<option value="koreksi">Koreksi (ubah nominal/tanggal)</option>'}<option value="void">Batalkan (void)</option></select></div>
     <div id="kr-koreksi" style="display:${gajiOnly?"none":"block"}">
-      ${t.tipe!=="mutasi"?`<div class="field"><label>Sumber dana</label><select id="kr-akun"><option value="tunai" ${t.akun==="tunai"?"selected":""}>Kas Tunai</option><option value="rekening" ${t.akun==="rekening"?"selected":""}>Kas Rekening</option></select></div>`:""}
+      ${t.tipe!=="mutasi"?`<div class="field"><label>Sumber dana</label><select id="kr-akun"><option value="tunai" ${t.akun==="tunai"?"selected":""}>Kas Tunai</option><option value="rekening" ${t.akun==="rekening"?"selected":""}>Kas Rekening</option><option value="owner" ${t.akun==="owner"?"selected":""}>Kas Owner</option></select></div>`:""}
       <div class="field"><label>Nominal baru (Rp)</label><input id="kr-jumlah" class="num" data-num="int" data-hint="kr-hint" type="text" inputmode="numeric" value="${t.jumlah||0}"><div class="hint" id="kr-hint">= ${rupiah(t.jumlah||0)}</div></div>
       <div class="field"><label>Tanggal baru</label><input id="kr-tgl" type="date" value="${t.tanggal||todayStr()}"></div>
       <div class="field"><label>Keterangan baru</label><input id="kr-ket" type="text" value="${esc(t.keterangan||"")}"></div>
@@ -582,7 +596,7 @@ function reqCard(m){
   const title=t?transaksiTitle(t):"Transaksi";
   let detail="";
   if(m.tipe==="void") detail=`<div style="font-size:13px;color:var(--neg);font-weight:700;margin-top:4px">Minta dibatalkan (void)</div>`;
-  else { const d=m.data_koreksi||{}; detail=`<div style="font-size:13px;margin-top:4px">Koreksi → <b>${rupiah(d.jumlah)}</b>${d.akun?` · <b>${d.akun==="tunai"?"Kas Tunai":"Kas Rekening"}</b>`:""}${d.tanggal?` · ${fmtTgl(d.tanggal)}`:""}${d.keterangan?` · ${esc(d.keterangan)}`:""}</div>`; }
+  else { const d=m.data_koreksi||{}; detail=`<div style="font-size:13px;margin-top:4px">Koreksi → <b>${rupiah(d.jumlah)}</b>${d.akun?` · <b>${akunLabel(d.akun)}</b>`:""}${d.tanggal?` · ${fmtTgl(d.tanggal)}`:""}${d.keterangan?` · ${esc(d.keterangan)}`:""}</div>`; }
   return `<div class="card" style="margin-bottom:10px"><div style="font-weight:700">${esc(title)}</div>
     <div style="font-size:13px;color:var(--muted)">${t?(fmtTgl(t.tanggal)+" · "+rupiah(t.jumlah)):"(transaksi tidak ditemukan)"}</div>
     ${detail}
@@ -601,7 +615,7 @@ async function setujuiReq(id){
     if(d.jumlah!=null) upd.jumlah=d.jumlah;
     if(d.tanggal) upd.tanggal=d.tanggal;
     if(d.keterangan!=null) upd.keterangan=d.keterangan;
-    if(d.akun==="tunai"||d.akun==="rekening") upd.akun=d.akun;
+    if(d.akun==="tunai"||d.akun==="rekening"||d.akun==="owner") upd.akun=d.akun;
     if(Object.keys(upd).length) await sb.from("transaksi").update(upd).eq("id",m.transaksi_id);
   }
   await sb.from("permintaan").update({status:"disetujui",ditanggapi_oleh:me.id,responded_at:nowISO()}).eq("id",id);
@@ -645,6 +659,37 @@ async function simpanKasbon(){
   const { error }=await sb.from("transaksi").insert(payload);
   if(error){ console.log(error); toast("Gagal menyimpan","err"); return; }
   closeModal(); toast("Kasbon tersimpan","ok"); await loadTx(); renderKas();
+}
+
+/* --- bayar/cicil kasbon di luar proses gaji --- */
+async function openBayarKasbon(){
+  const hutang=await hutangKasbonMap();
+  const opts=Object.keys(hutang).filter(id=>Math.round(hutang[id]||0)>0)
+    .map(id=>({id,nama:namaTukang(id),sisa:Math.round(hutang[id])}))
+    .sort((a,b)=>a.nama.localeCompare(b.nama));
+  if(!opts.length){ toast("Tidak ada tukang dengan hutang kasbon saat ini","err"); return; }
+  const optHtml=opts.map(o=>`<option value="${o.id}" data-sisa="${o.sisa}">${esc(o.nama)} — sisa ${rupiah(o.sisa)}</option>`).join("");
+  openModal("Bayar / Cicil Kasbon",`
+    <p style="font-size:13px;color:var(--muted);margin:0 0 12px">Untuk pelunasan atau cicilan kasbon yang dibayar langsung tukang, di luar potongan gaji mingguan — bisa dicatat kapan saja.</p>
+    <div class="field"><label>Tukang</label><select id="pk-tukang" onchange="pkSisaUpdate()">${optHtml}</select></div>
+    <div class="field"><label>Jumlah dibayar (Rp)</label><input id="pk-jumlah" class="num" data-num="int" data-hint="pk-hint" type="text" inputmode="numeric" value="${opts[0].sisa}"><div class="hint" id="pk-hint">= ${rupiah(opts[0].sisa)} · sisa hutang ${esc(opts[0].nama)}: ${rupiah(opts[0].sisa)}</div></div>
+    <div class="field"><label>Diterima ke</label><select id="pk-akun"><option value="tunai">Kas Tunai</option><option value="rekening">Kas Rekening</option></select></div>
+    <div class="field"><label>Tanggal</label><input id="pk-tgl" type="date" value="${todayStr()}"></div>
+    <div class="field"><label>Keterangan</label><input id="pk-ket" type="text" placeholder="opsional"></div>`,
+    `<button class="btn ghost" onclick="closeModal()">Batal</button><button class="btn primary" onclick="simpanBayarKasbon()">Simpan</button>`);
+}
+function pkSisaUpdate(){
+  const sel=$("pk-tukang"); const sisa=Number(sel.selectedOptions[0].dataset.sisa)||0;
+  $("pk-jumlah").value=String(sisa);
+  const h=$("pk-hint"); if(h) h.textContent="= "+rupiah(sisa)+" · sisa hutang "+sel.selectedOptions[0].textContent.split(" — ")[0]+": "+rupiah(sisa);
+}
+async function simpanBayarKasbon(){
+  const tukang_id=$("pk-tukang").value, jumlah=numVal($("pk-jumlah"));
+  if(jumlah<=0){ toast("Jumlah harus > 0","err"); return; }
+  const payload={tanggal:$("pk-tgl").value||todayStr(),tipe:"masuk",akun:$("pk-akun").value,kategori:"kasbon",jumlah,tukang_id,keterangan:$("pk-ket").value.trim()||("Pembayaran kasbon "+namaTukang(tukang_id)),dibuat_oleh:me.id};
+  const { error }=await sb.from("transaksi").insert(payload);
+  if(error){ console.log(error); toast("Gagal menyimpan","err"); return; }
+  closeModal(); toast("Pembayaran kasbon tercatat","ok"); await loadTx(); renderKas();
 }
 function openModalIncome(){
   openModal("Tambah Modal / Saldo Awal",`
@@ -863,8 +908,8 @@ async function openBayar(id){
   openModal("Bayar Pembelian",`
     <div style="font-weight:700;font-size:15px">${esc(p.item)}</div>
     <div style="font-size:13px;color:var(--muted);margin:2px 0 12px">${esc(p.supplier_id?namaSupplier(p.supplier_id):"-")} · ${p.qty||0} ${esc(p.satuan||"")} × ${rupiah(p.harga_satuan)}${p.jatuh_tempo?(" · tempo "+fmtTgl(p.jatuh_tempo)):""}</div>
-    <div style="font-size:13px;color:var(--muted);margin-bottom:12px">Saldo tunai ${rupiah(s.tunai)} · rekening ${rupiah(s.rek)}</div>
-    <div class="field"><label>Sumber dana</label><select id="by-akun"><option value="tunai">Kas Tunai</option><option value="rekening">Kas Rekening</option></select></div>
+    <div style="font-size:13px;color:var(--muted);margin-bottom:12px">Saldo tunai ${rupiah(s.tunai)} · rekening ${rupiah(s.rek)} · owner ${rupiah(s.owner)}</div>
+    <div class="field"><label>Sumber dana</label><select id="by-akun"><option value="tunai">Kas Tunai</option><option value="rekening">Kas Rekening</option><option value="owner">Kas Owner (dibayar owner langsung)</option></select></div>
     <div class="field"><label>Jumlah bayar (Rp)</label><input id="by-jumlah" class="num" data-num="int" data-hint="by-hint" type="text" inputmode="numeric" value="${p.total||0}"><div class="hint" id="by-hint">${p.total?("= "+rupiah(p.total)):""}</div></div>
     <div class="field"><label>Tanggal</label><input id="by-tgl" type="date" value="${todayStr()}"></div>`,
     `<button class="btn ghost" onclick="closeModal()">Batal</button><button class="btn primary" onclick="simpanBayar('${id}')">Bayar</button>`);
@@ -874,7 +919,7 @@ async function simpanBayar(id){
   const jumlah=numVal($("by-jumlah")), akun=$("by-akun").value;
   if(jumlah<=0){ toast("Jumlah harus > 0","err"); return; }
   const s=await getSaldo();
-  if((akun==="tunai"?s.tunai:s.rek)<jumlah){ toast("Saldo "+(akun==="tunai"?"tunai":"rekening")+" tidak cukup","err"); return; }
+  if(akun!=="owner" && (akun==="tunai"?s.tunai:s.rek)<jumlah){ toast("Saldo "+(akun==="tunai"?"tunai":"rekening")+" tidak cukup","err"); return; }
   const tx={tanggal:$("by-tgl").value||todayStr(),tipe:"keluar",akun,kategori:(p.jenis==="jasa"?"jasa":"material"),jumlah,supplier_id:p.supplier_id,pembelian_id:id,keterangan:p.item,dibuat_oleh:me.id};
   const { data:txRow, error:e1 }=await sb.from("transaksi").insert(tx).select().single();
   if(e1){ console.log(e1); toast("Gagal membuat transaksi","err"); return; }
@@ -890,8 +935,8 @@ async function openBayarSemua(){
   const s=await getSaldo();
   openModal("Bayar Semua Jatuh Tempo",`
     <div style="font-size:13px;color:var(--muted);margin-bottom:10px">${due.length} nota · total <b>${rupiah(total)}</b></div>
-    <div style="font-size:13px;color:var(--muted);margin-bottom:12px">Saldo tunai ${rupiah(s.tunai)} · rekening ${rupiah(s.rek)}</div>
-    <div class="field"><label>Sumber dana</label><select id="bs-akun"><option value="tunai">Kas Tunai</option><option value="rekening">Kas Rekening</option></select></div>
+    <div style="font-size:13px;color:var(--muted);margin-bottom:12px">Saldo tunai ${rupiah(s.tunai)} · rekening ${rupiah(s.rek)} · owner ${rupiah(s.owner)}</div>
+    <div class="field"><label>Sumber dana</label><select id="bs-akun"><option value="tunai">Kas Tunai</option><option value="rekening">Kas Rekening</option><option value="owner">Kas Owner (dibayar owner langsung)</option></select></div>
     <div class="field"><label>Tanggal bayar</label><input id="bs-tgl" type="date" value="${todayStr()}"></div>`,
     `<button class="btn ghost" onclick="closeModal()">Batal</button><button class="btn primary" onclick="simpanBayarSemua()">Bayar ${rupiah(total)}</button>`);
 }
@@ -902,7 +947,7 @@ async function simpanBayarSemua(){
   const total=due.reduce((a,p)=>a+(Number(p.total)||0),0);
   if(!due.length){ toast("Tidak ada nota","err"); return; }
   const s=await getSaldo();
-  if((akun==="tunai"?s.tunai:s.rek)<total){ toast("Saldo "+(akun==="tunai"?"tunai":"rekening")+" tidak cukup untuk "+rupiah(total),"err"); return; }
+  if(akun!=="owner" && (akun==="tunai"?s.tunai:s.rek)<total){ toast("Saldo "+(akun==="tunai"?"tunai":"rekening")+" tidak cukup untuk "+rupiah(total),"err"); return; }
   const rows=due.map(p=>({tanggal:tgl,tipe:"keluar",akun,kategori:(p.jenis==="jasa"?"jasa":"material"),jumlah:Number(p.total)||0,supplier_id:p.supplier_id,pembelian_id:p.id,keterangan:p.item,dibuat_oleh:me.id}));
   const { data:txRows, error:e1 }=await sb.from("transaksi").insert(rows).select();
   if(e1){ console.log(e1); toast("Gagal membuat transaksi","err"); return; }
@@ -1079,17 +1124,12 @@ function waSlip(i){
 async function buildPreview(){
   const mulai=payPeriod.mulai, selesai=payPeriod.selesai;
   if(!mulai||!selesai||mulai>selesai){ toast("Periode tidak valid","err"); return; }
-  const [absR,kompR,ksbR,dedR]=await Promise.all([
+  const [absR,kompR,hutang]=await Promise.all([
     sb.from("absensi").select("tukang_id,status").gte("tanggal",mulai).lte("tanggal",selesai),
     sb.from("gaji_komponen").select("id,tukang_id,jenis,jumlah").is("payroll_id",null).gte("tanggal",mulai).lte("tanggal",selesai),
-    sb.from("transaksi").select("tukang_id,jumlah").eq("kategori","kasbon").eq("status","aktif"),
-    sb.from("payroll_detail").select("tukang_id,kasbon").gt("kasbon",0)
+    hutangKasbonMap()
   ]);
   const abs=absR.data||[], komp=kompR.data||[];
-  // hutang kasbon berjalan = semua kasbon aktif − semua potongan slip sebelumnya
-  const hutang={};
-  (ksbR.data||[]).forEach(t=>{ if(t.tukang_id) hutang[t.tukang_id]=(hutang[t.tukang_id]||0)+(Number(t.jumlah)||0); });
-  (dedR.data||[]).forEach(d=>{ if(d.tukang_id) hutang[d.tukang_id]=(hutang[d.tukang_id]||0)-(Number(d.kasbon)||0); });
   const map={}; const G=id=>{ if(!map[id]) map[id]={penuh:0,setengah:0,lembur:0,tambahan:0}; return map[id]; };
   abs.forEach(a=>{ if(a.status==="penuh")G(a.tukang_id).penuh++; else if(a.status==="setengah")G(a.tukang_id).setengah++; });
   const kompIds=[];
@@ -1187,10 +1227,27 @@ async function openPayroll(id){
   const p=dataPayroll.find(x=>x.id===id); if(!p) return;
   const { data:det }=await sb.from("payroll_detail").select("*").eq("payroll_id",id);
   currentSlip={rows:det||[],mulai:p.periode_mulai,selesai:p.periode_selesai};
+  const { data:txAktif }=await sb.from("transaksi").select("id").eq("payroll_id",id).eq("kategori","gaji").eq("status","aktif").limit(1);
+  const canVoid = me.role==="manager" && txAktif && txAktif.length>0;
   const body=(det||[]).map((r,i)=>`<div class="tx"><div class="l"><div class="k">${esc(r.nama)}</div><div class="d">${r.hari_penuh} penuh${r.hari_setengah?` + ${r.hari_setengah} ½`:""} · ${rupiah(r.gaji_bersih)}</div></div><div class="r">${r.no_hp?`<button class="btn ghost sm" onclick="waSlip(${i})">WA</button>`:""}</div></div>`).join("");
   openModal("Slip "+fmtTgl(p.periode_mulai)+" – "+fmtTgl(p.periode_selesai),
-    `<div class="bigtotal" style="margin-bottom:12px"><div class="l">TOTAL DIBAYAR</div><div class="v tnum">${rupiah(p.total_bersih)}</div><div class="s">${(det||[]).length} tukang</div></div><div class="list">${body||'<div class="empty">Tidak ada rincian.</div>'}</div>`,
+    `<div class="bigtotal" style="margin-bottom:12px"><div class="l">TOTAL DIBAYAR</div><div class="v tnum">${rupiah(p.total_bersih)}</div><div class="s">${(det||[]).length} tukang</div></div><div class="list">${body||'<div class="empty">Tidak ada rincian.</div>'}</div>
+    ${canVoid?`<div class="danger-zone"><button class="btn danger block" onclick="openVoidSlip('${id}','${txAktif[0].id}')">Void slip ini (ada kesalahan)</button></div>`:""}`,
     `<button class="btn primary block" onclick="closeModal()">Tutup</button>`);
+}
+function openVoidSlip(payrollId, txId){
+  openModal("Void Slip Gaji",`
+    <p style="font-size:13px;color:var(--neg);font-weight:600;margin:0 0 12px">Seluruh slip gaji ini akan DIBATALKAN: uang kembali ke kas, rincian slip dihapus, potongan kasbon kembali menjadi hutang, dan lembur/tambahan terbuka lagi. Setelah itu slip bisa dihitung ulang dari menu Gaji.</p>
+    <div class="field"><label>Alasan void</label><textarea id="vs-alasan" rows="2" placeholder="cth: salah hitung absensi"></textarea></div>`,
+    `<button class="btn ghost" onclick="openPayroll('${payrollId}')">Batal</button><button class="btn danger" onclick="doVoidSlip('${txId}')">Void slip</button>`);
+}
+async function doVoidSlip(txId){
+  const { data:t, error:e0 }=await sb.from("transaksi").select("*").eq("id",txId).single();
+  if(e0||!t){ toast("Transaksi tidak ditemukan","err"); return; }
+  const { error }=await sb.from("transaksi").update({status:"void",void_oleh:me.id,alasan_void:$("vs-alasan").value.trim(),tgl_void:nowISO()}).eq("id",txId);
+  if(error){ console.log(error); toast("Gagal void","err"); return; }
+  if(t.payroll_id){ await voidPayrollCascade(t.payroll_id); await loadKomp(); payPreview=null; }
+  closeModal(); toast("Slip gaji dibatalkan","ok"); await loadTx(); await loadPayroll(); renderGaji();
 }
 
 /* ===================== LAPORAN ===================== */
@@ -1220,9 +1277,10 @@ async function buildLaporan(){
   let det=[]; if(prIds.length){ const r=await sb.from("payroll_detail").select("*").in("payroll_id",prIds); det=r.data||[]; }
   const { data:tx }=await sb.from("transaksi").select("*").gte("tanggal",a).lte("tanggal",b);
   const { data:prev }=await sb.from("transaksi").select("tipe,akun,jumlah").eq("status","aktif").lt("tanggal",a);
-  const { data:kasbonAll }=await sb.from("transaksi").select("tukang_id,jumlah").eq("kategori","kasbon").eq("status","aktif");
+  const { data:kasbonAll }=await sb.from("transaksi").select("tukang_id,jumlah").eq("kategori","kasbon").eq("tipe","keluar").eq("status","aktif");
+  const { data:bayarAll }=await sb.from("transaksi").select("tukang_id,jumlah").eq("kategori","kasbon").eq("tipe","masuk").eq("status","aktif");
   const { data:dedAll }=await sb.from("payroll_detail").select("tukang_id,kasbon").gt("kasbon",0);
-  repData={ a,b, details:det, tx:tx||[], prev:prev||[], kasbonAll:kasbonAll||[], dedAll:dedAll||[] };
+  repData={ a,b, details:det, tx:tx||[], prev:prev||[], kasbonAll:kasbonAll||[], bayarAll:bayarAll||[], dedAll:dedAll||[] };
   renderLaporanBody();
 }
 function renderLaporanBody(){
@@ -1260,20 +1318,24 @@ function repTxLine(t){
   return `<div class="tx"><div class="l"><div class="k">${esc(title)}</div><div class="d">${fmtTgl(t.tanggal)}${t.keterangan?(" · "+esc(t.keterangan)):""}</div></div><div class="r"><div class="a ${cls}">${amt}</div></div></div>`;
 }
 function repKasbon(){
-  const ks=repData.tx.filter(t=>t.kategori==="kasbon"&&t.status==="aktif");
+  const ambil=repData.tx.filter(t=>t.kategori==="kasbon"&&t.tipe==="keluar"&&t.status==="aktif");
+  const bayar=repData.tx.filter(t=>t.kategori==="kasbon"&&t.tipe==="masuk"&&t.status==="aktif");
   const out={};
   (repData.kasbonAll||[]).forEach(t=>{ if(t.tukang_id) out[t.tukang_id]=(out[t.tukang_id]||0)+(Number(t.jumlah)||0); });
+  (repData.bayarAll||[]).forEach(t=>{ if(t.tukang_id) out[t.tukang_id]=(out[t.tukang_id]||0)-(Number(t.jumlah)||0); });
   (repData.dedAll||[]).forEach(d=>{ if(d.tukang_id) out[d.tukang_id]=(out[d.tukang_id]||0)-(Number(d.kasbon)||0); });
   const map={};
-  const G=k=>{ if(!map[k])map[k]={nama:k!=="-"?namaTukang(k):"(tanpa tukang)",ambil:0,n:0,sisa:0}; return map[k]; };
-  ks.forEach(t=>{ const k=t.tukang_id||"-"; const m=G(k); m.ambil+=Number(t.jumlah)||0; m.n++; });
+  const G=k=>{ if(!map[k])map[k]={nama:k!=="-"?namaTukang(k):"(tanpa tukang)",ambil:0,bayar:0,sisa:0}; return map[k]; };
+  ambil.forEach(t=>{ const k=t.tukang_id||"-"; G(k).ambil+=Number(t.jumlah)||0; });
+  bayar.forEach(t=>{ const k=t.tukang_id||"-"; G(k).bayar+=Number(t.jumlah)||0; });
   Object.keys(out).forEach(k=>{ if(out[k]>0) G(k).sisa=Math.round(out[k]); });
   const rows=Object.values(map).sort((a,b)=>b.sisa-a.sisa||b.ambil-a.ambil);
   if(!rows.length) return `<div class="empty">Tidak ada kasbon.</div>`;
-  let gA=0,gS=0;
-  const body=rows.map(r=>{ gA+=r.ambil; gS+=r.sisa;
-    return `<div class="tx"><div class="l"><div class="k">${esc(r.nama)}</div><div class="d">Diambil periode ini: ${r.ambil?rupiah(r.ambil)+(r.n?` (${r.n}x)`:""):"–"}</div></div><div class="r"><div class="a tnum ${r.sisa?'due':''}">${r.sisa?("sisa "+rupiah(r.sisa)):"lunas"}</div></div></div>`; }).join("");
-  return `<div class="bigtotal"><div class="l">SISA HUTANG KASBON (BELUM DIPOTONG)</div><div class="v tnum">${rupiah(gS)}</div><div class="s">Diambil pada periode ini: ${rupiah(gA)}</div></div><div class="list" style="margin-top:8px">${body}</div>`;
+  let gA=0,gB=0,gS=0;
+  const body=rows.map(r=>{ gA+=r.ambil; gB+=r.bayar; gS+=r.sisa;
+    const parts=[]; if(r.ambil) parts.push("ambil "+rupiah(r.ambil)); if(r.bayar) parts.push("bayar "+rupiah(r.bayar));
+    return `<div class="tx"><div class="l"><div class="k">${esc(r.nama)}</div><div class="d">${parts.length?parts.join(" · "):"–"}</div></div><div class="r"><div class="a tnum ${r.sisa?'due':''}">${r.sisa?("sisa "+rupiah(r.sisa)):"lunas"}</div></div></div>`; }).join("");
+  return `<div class="bigtotal"><div class="l">SISA HUTANG KASBON (BELUM DIPOTONG)</div><div class="v tnum">${rupiah(gS)}</div><div class="s">Diambil periode ini: ${rupiah(gA)} · dibayar: ${rupiah(gB)}</div></div><div class="list" style="margin-top:8px">${body}</div>`;
 }
 function repKas(){
   const aktif=repData.tx.filter(t=>t.status==="aktif");
