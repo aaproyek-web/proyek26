@@ -136,8 +136,8 @@
   input[type=number]::-webkit-inner-spin-button,input[type=number]::-webkit-outer-spin-button{-webkit-appearance:none;margin:0}
   input[type=number]{-moz-appearance:textfield}
 
-  .botnav{position:fixed;left:0;right:0;bottom:0;z-index:30;background:#fff;border-top:1px solid var(--line);display:flex;justify-content:space-around;padding:6px 2px env(safe-area-inset-bottom)}
-  .nav-item{flex:1;background:none;border:0;color:var(--muted);display:flex;flex-direction:column;align-items:center;gap:3px;padding:6px 1px;font-size:10.5px;font-weight:600;border-radius:10px;position:relative}
+  .botnav{position:fixed;left:0;right:0;bottom:0;z-index:30;background:#fff;border-top:1px solid var(--line);display:flex;justify-content:space-around;padding:6px 2px env(safe-area-inset-bottom);overflow-x:auto}
+  .nav-item{flex:1 0 auto;min-width:58px;background:none;border:0;color:var(--muted);display:flex;flex-direction:column;align-items:center;gap:3px;padding:6px 4px;font-size:10.5px;font-weight:600;border-radius:10px;position:relative;white-space:nowrap}
   .nav-item.active{color:var(--brand)}
   .nav-item.active::before{content:"";position:absolute;top:0;width:24px;height:3px;border-radius:0 0 3px 3px;background:var(--brand)}
 
@@ -317,8 +317,8 @@ async function doLogout(){ stopRealtime(); await sb.auth.signOut(); me=null; $("
 async function enterApp(){
   $("login").style.display="none"; $("app").style.display="block";
   $("tb-nama").textContent=me.nama; $("tb-rolename").textContent=me.role;
-  $("tb-role").textContent=me.role==="manager"?"Manajer":me.role==="admin"?"Admin":"Security";
-  $("bell").style.display=me.role==="manager"?"flex":"none";
+  $("tb-role").textContent=me.role==="owner"?"Owner":me.role==="manager"?"Manajer":me.role==="admin"?"Admin":"Security";
+  $("bell").style.display=(me.role==="manager"||me.role==="owner")?"flex":"none";
   buildNav(); startRealtime();
   await loadAll();
   showView(NAV[me.role][0].id);
@@ -338,7 +338,8 @@ const ICONS={
 const NAV={
   manager:[{id:"beranda",l:"Beranda"},{id:"pembelian",l:"Beli"},{id:"kas",l:"Kas"},{id:"gaji",l:"Gaji"},{id:"laporan",l:"Laporan"},{id:"data",l:"Data"}],
   admin:[{id:"beranda",l:"Beranda"},{id:"kas",l:"Kas"},{id:"pembelian",l:"Beli"},{id:"gaji",l:"Gaji"},{id:"data",l:"Data"}],
-  security:[{id:"beranda",l:"Beranda"},{id:"absensi",l:"Absensi"},{id:"barangdatang",l:"Barang"}]
+  security:[{id:"beranda",l:"Beranda"},{id:"absensi",l:"Absensi"},{id:"barangdatang",l:"Barang"}],
+  owner:[{id:"beranda",l:"Beranda"},{id:"pembelian",l:"Beli"},{id:"kas",l:"Kas"},{id:"gaji",l:"Gaji"},{id:"absensi",l:"Absensi"},{id:"barangdatang",l:"Barang"},{id:"laporan",l:"Laporan"},{id:"data",l:"Data"}]
 };
 function buildNav(){
   const nav=$("botnav"); nav.innerHTML="";
@@ -383,7 +384,7 @@ function stopRealtime(){ if(rtChannel){ sb.removeChannel(rtChannel); rtChannel=n
 function notifCount(){ return dataBeli.filter(p=>p.status==="diajukan").length + dataMinta.filter(m=>m.status==="diajukan").length; }
 function updateNotif(){
   const bell=$("bell"), badge=$("bell-badge");
-  if(!me||me.role!=="manager"){ if(bell) bell.style.display="none"; return; }
+  if(!me||(me.role!=="manager"&&me.role!=="owner")){ if(bell) bell.style.display="none"; return; }
   bell.style.display="flex";
   const n=notifCount();
   if(n>0){ badge.textContent=n>9?"9+":String(n); badge.style.display="flex"; } else badge.style.display="none";
@@ -451,16 +452,16 @@ async function renderBeranda(){
   let extra="";
   const today=todayStr();
   const due=payables().filter(p=>isDue(p,today));
-  if(me.role==="manager"){
+  if(me.role==="manager"||me.role==="owner"){
     const pend=dataBeli.filter(p=>p.status==="diajukan").length;
     const kreq=dataMinta.filter(m=>m.tipe==="kas"&&m.status==="diajukan").length;
     if(pend>0) extra+=`<button class="btn primary block" style="margin-top:12px" onclick="showView('pembelian')">${pend} pengajuan pembelian menunggu</button>`;
     if(kreq>0) extra+=`<button class="btn ghost block" style="margin-top:8px" onclick="showView('pembelian')">${kreq} permintaan kas tambahan</button>`;
   }
-  if(me.role==="admin"){
+  if(me.role==="admin"||me.role==="owner"){
     const proses=dataBeli.filter(p=>p.status==="barang_masuk").length;
     const parts=[]; if(proses)parts.push(proses+" barang perlu diproses"); if(due.length)parts.push(due.length+" nota jatuh tempo");
-    if(parts.length) extra=`<button class="btn ghost block" style="margin-top:12px" onclick="showView('pembelian')">${parts.join(" · ")}</button>`;
+    if(parts.length) extra+=`<button class="btn ghost block" style="margin-top:12px" onclick="showView('pembelian')">${parts.join(" · ")}</button>`;
   }
   w.innerHTML=`<h3>Halo, ${esc(me.nama)} 👋</h3><p>Ringkasan proyek saat ini.</p>
     <div class="kpis"><div class="kpi"><div class="v">${dataTukang.filter(t=>t.aktif).length}</div><div class="l">Tukang aktif</div></div><div class="kpi"><div class="v">${dataSupplier.filter(x=>x.aktif).length}</div><div class="l">Supplier</div></div></div>${extra}`;
@@ -505,7 +506,8 @@ function renderKas(){
   let actions="";
   if(me.role==="admin") actions=`<button class="btn primary" onclick="openKasbon()">＋ Kasbon</button><button class="btn ghost" onclick="openBayarKasbon()">Bayar Kasbon</button><button class="btn ghost" onclick="openMutasi()">Mutasi →</button><button class="btn ghost" onclick="openBank()">Bank</button>`;
   if(me.role==="manager") actions=`<button class="btn primary" onclick="openModalIncome()">＋ Modal</button><button class="btn ghost" onclick="openBayarKasbon()">Bayar Kasbon</button><button class="btn ghost" onclick="openMutasi()">Mutasi →</button><button class="btn ghost" onclick="openBank()">Bank</button>`;
-  const reqs=(me.role==="manager")?dataMinta.filter(m=>(m.tipe==="void"||m.tipe==="koreksi")&&m.status==="diajukan"):[];
+  if(me.role==="owner") actions=`<button class="btn primary" onclick="openModalIncome()">＋ Modal</button><button class="btn ghost" onclick="openKasbon()">＋ Kasbon</button><button class="btn ghost" onclick="openBayarKasbon()">Bayar Kasbon</button><button class="btn ghost" onclick="openMutasi()">Mutasi →</button><button class="btn ghost" onclick="openBank()">Bank</button>`;
+  const reqs=(me.role==="manager"||me.role==="owner")?dataMinta.filter(m=>(m.tipe==="void"||m.tipe==="koreksi")&&m.status==="diajukan"):[];
   const list=dataTx.map(txItem).join("");
   getSaldo().then(s=>{
     $("view-kas").innerHTML=`
@@ -534,7 +536,7 @@ function txItem(t){
   let act="";
   const eligible = t.status==="aktif" && (!t.payroll_id || t.kategori==="gaji");
   if(eligible){
-    if(me.role==="manager") act=`<button class="btn ghost sm" style="margin-top:6px;padding:4px 10px" onclick="openVoid('${t.id}')">Void</button>`;
+    if(me.role==="manager"||me.role==="owner") act=`<button class="btn ghost sm" style="margin-top:6px;padding:4px 10px" onclick="openVoid('${t.id}')">Void</button>`;
     else if(me.role==="admin") act=`<button class="btn ghost sm" style="margin-top:6px;padding:4px 10px" onclick="openKoreksiReq('${t.id}')">Koreksi</button>`;
   }
   return `<div class="tx ${t.status==='void'?'void':''}"><div class="l"><div class="k">${esc(title)} ${t.status==='void'?'<span class="voidtag">VOID</span>':''}</div><div class="d">${fmtTgl(t.tanggal)}${ket}</div></div><div class="r"><div class="a ${cls}">${amt}</div>${chips}${act}</div></div>`;
@@ -776,14 +778,14 @@ function danaStr(p){
 function beliLine(p){
   const sup=p.supplier_id?namaSupplier(p.supplier_id):"-";
   const sub=p.harga_satuan? `${p.qty||0} ${esc(p.satuan||"")} × ${rupiah(p.harga_satuan)} = ${rupiah(p.total)}` : `${p.qty||0} ${esc(p.satuan||"")}`;
-  const bisaBatal = me.role==="manager" && p.status!=="ditolak" && p.status!=="dibatalkan";
+  const bisaBatal = (me.role==="manager"||me.role==="owner") && p.status!=="ditolak" && p.status!=="dibatalkan";
   return `<div class="tx"><div class="l"><div class="k">${esc(p.item)}</div><div class="d">${p.jenis==='jasa'?'Jasa · ':''}${esc(sup)} · ${sub}${tempoStr(p)}${danaStr(p)}</div><div style="margin-top:6px">${beliBadge(p)}</div>${p.status==="ditolak"&&p.alasan_tolak?`<div class="d" style="color:var(--neg);margin-top:4px">Alasan: ${esc(p.alasan_tolak)}</div>`:""}${p.status==="dibatalkan"&&p.alasan_batal?`<div class="d" style="color:var(--muted);margin-top:4px">Alasan dibatalkan: ${esc(p.alasan_batal)}</div>`:""}${bisaBatal?`<button class="btn ghost sm" style="margin-top:8px" onclick="openBatalkanBeli('${p.id}')">Batalkan pembelian</button>`:""}</div></div>`;
 }
 function actionCard(p,type){
   const sup=p.supplier_id?namaSupplier(p.supplier_id):"-";
   let btn="";
   if(type==="proses") btn=`<button class="btn ghost sm" style="margin-right:6px" onclick="openHapusBarang('${p.id}')">Hapus</button><button class="btn primary sm" onclick="openProses('${p.id}')">Proses</button>`;
-  if(type==="bayar"){ btn=`<button class="btn primary sm" onclick="openBayar('${p.id}')">Bayar</button>`; if(me.role==="manager") btn=`<button class="btn ghost sm" style="margin-right:6px" onclick="openBatalkanBeli('${p.id}')">Batalkan</button>`+btn; }
+  if(type==="bayar"){ btn=`<button class="btn primary sm" onclick="openBayar('${p.id}')">Bayar</button>`; if(me.role==="manager"||me.role==="owner") btn=`<button class="btn ghost sm" style="margin-right:6px" onclick="openBatalkanBeli('${p.id}')">Batalkan</button>`+btn; }
   const sub=p.harga_satuan? `${p.qty||0} ${esc(p.satuan||"")} × ${rupiah(p.harga_satuan)} = ${rupiah(p.total)}` : `${p.qty||0} ${esc(p.satuan||"")}`;
   return `<div class="tx"><div class="l"><div class="k">${esc(p.item)}</div><div class="d">${p.jenis==='jasa'?'Jasa · ':''}${esc(sup)} · ${sub}${tempoStr(p)}${danaStr(p)}</div></div><div class="r" style="display:flex;align-items:center">${btn}</div></div>`;
 }
@@ -842,7 +844,7 @@ function kasCard(m){
 }
 function setTempoDate(v){ tempoDate=v; renderPembelian(); }
 function renderPembelian(){
-  const isMgr=me.role==="manager";
+  const isMgr=me.role==="manager"||me.role==="owner";
   const ref=tempoDate||todayStr();
   const pendingApproval=dataBeli.filter(p=>p.status==="diajukan");
   const masuk=dataBeli.filter(p=>p.status==="barang_masuk");
@@ -1278,7 +1280,7 @@ async function openPayroll(id){
   const { data:det }=await sb.from("payroll_detail").select("*").eq("payroll_id",id);
   currentSlip={rows:det||[],mulai:p.periode_mulai,selesai:p.periode_selesai};
   const { data:txAktif }=await sb.from("transaksi").select("id").eq("payroll_id",id).eq("kategori","gaji").eq("status","aktif").limit(1);
-  const canVoid = me.role==="manager" && txAktif && txAktif.length>0;
+  const canVoid = (me.role==="manager"||me.role==="owner") && txAktif && txAktif.length>0;
   const body=(det||[]).map((r,i)=>`<div class="tx"><div class="l"><div class="k">${esc(r.nama)}</div><div class="d">${r.hari_penuh} penuh${r.hari_setengah?` + ${r.hari_setengah} ½`:""} · ${rupiah(r.gaji_bersih)}</div></div><div class="r">${r.no_hp?`<button class="btn ghost sm" onclick="waSlip(${i})">WA</button>`:""}</div></div>`).join("");
   openModal("Slip "+fmtTgl(p.periode_mulai)+" – "+fmtTgl(p.periode_selesai),
     `<div class="bigtotal" style="margin-bottom:12px"><div class="l">TOTAL DIBAYAR</div><div class="v tnum">${rupiah(p.total_bersih)}</div><div class="s">${(det||[]).length} tukang</div></div><div class="list">${body||'<div class="empty">Tidak ada rincian.</div>'}</div>
@@ -1306,6 +1308,7 @@ function localDate(dt){ return dt.getFullYear()+"-"+pad2(dt.getMonth()+1)+"-"+pa
 function setRP(k,v){ repPeriod[k]=v; }
 function switchRep(t){ repTab=t; renderLaporan(); }
 function renderLaporan(){
+  if(repTab==="log" && me.role!=="owner") repTab="tukang";
   if(!repPeriod.mulai){ const now=new Date(); repPeriod={mulai:localDate(new Date(now.getFullYear(),now.getMonth(),1)),selesai:localDate(now)}; }
   $("view-laporan").innerHTML=`
     <div class="page-head"><h2>Laporan</h2></div>
@@ -1313,7 +1316,7 @@ function renderLaporan(){
       <div class="field-2"><div class="field"><label>Dari tanggal</label><input id="rp-mulai" type="date" value="${repPeriod.mulai}" onchange="setRP('mulai',this.value)"></div><div class="field"><label>Sampai</label><input id="rp-selesai" type="date" value="${repPeriod.selesai}" onchange="setRP('selesai',this.value)"></div></div>
       <button class="btn primary block" onclick="buildLaporan()">Tampilkan</button>
     </div>
-    <div class="seg"><button class="${repTab==='tukang'?'on':''}" onclick="switchRep('tukang')">Tukang</button><button class="${repTab==='supplier'?'on':''}" onclick="switchRep('supplier')">Supplier</button><button class="${repTab==='kasbon'?'on':''}" onclick="switchRep('kasbon')">Kasbon</button><button class="${repTab==='kas'?'on':''}" onclick="switchRep('kas')">Kas</button><button class="${repTab==='owner'?'on':''}" onclick="switchRep('owner')">Kas Owner</button><button class="${repTab==='log'?'on':''}" onclick="switchRep('log')">Log Aktivitas</button></div>
+    <div class="seg"><button class="${repTab==='tukang'?'on':''}" onclick="switchRep('tukang')">Tukang</button><button class="${repTab==='supplier'?'on':''}" onclick="switchRep('supplier')">Supplier</button><button class="${repTab==='kasbon'?'on':''}" onclick="switchRep('kasbon')">Kasbon</button><button class="${repTab==='kas'?'on':''}" onclick="switchRep('kas')">Kas</button><button class="${repTab==='owner'?'on':''}" onclick="switchRep('owner')">Kas Owner</button>${me.role==="owner"?`<button class="${repTab==='log'?'on':''}" onclick="switchRep('log')">Log Aktivitas</button>`:""}</div>
     <div id="laporan-body"><div class="empty">Pilih periode lalu tap “Tampilkan”.</div></div>
     <div class="actions" style="margin-top:14px"><button class="btn ghost" onclick="salinLaporan()">Salin ringkasan</button><button class="btn primary" onclick="kirimWaLaporan()">Kirim WA</button></div>
     <button class="btn ghost block" style="margin-top:10px" onclick="backupData()">⬇ Backup semua data (JSON)</button>`;
@@ -1330,7 +1333,7 @@ async function buildLaporan(){
   const { data:kasbonAll }=await sb.from("transaksi").select("tukang_id,jumlah").eq("kategori","kasbon").eq("tipe","keluar").eq("status","aktif");
   const { data:bayarAll }=await sb.from("transaksi").select("tukang_id,jumlah").eq("kategori","kasbon").eq("tipe","masuk").eq("status","aktif");
   const { data:dedAll }=await sb.from("payroll_detail").select("tukang_id,kasbon").gt("kasbon",0);
-  const { data:logRows }=await sb.from("log_aktivitas").select("*").gte("waktu",a+"T00:00:00").lte("waktu",b+"T23:59:59").order("waktu",{ascending:false}).limit(300);
+  const logRows = me.role==="owner" ? (await sb.from("log_aktivitas").select("*").gte("waktu",a+"T00:00:00").lte("waktu",b+"T23:59:59").order("waktu",{ascending:false}).limit(300)).data : [];
   repData={ a,b, details:det, tx:tx||[], prev:prev||[], kasbonAll:kasbonAll||[], bayarAll:bayarAll||[], dedAll:dedAll||[], log:logRows||[] };
   renderLaporanBody();
 }
