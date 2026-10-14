@@ -155,6 +155,15 @@
   @media(min-width:600px){.modal-overlay{align-items:center}.modal{border-radius:18px}}
 
 
+  .pos-tbl{width:100%;border-collapse:collapse;font-size:12.5px}
+  .pos-tbl th{font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.3px;text-align:left;padding:4px 6px}
+  .pos-tbl td{padding:6px 6px;border-top:1px solid var(--line);white-space:nowrap}
+  .pos-tbl .n{text-align:right;font-variant-numeric:tabular-nums}
+  .pos-tbl tr.sec td{background:#F1F5F9;font-size:10.5px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;border-top:0}
+  .pos-tbl tr.strong td{font-weight:800}
+  .pos-tbl tr.hl td{background:#FFFBEB}
+  .pos-tbl tr.total td{font-weight:800;border-top:2px solid var(--navy);background:#E8F0FA}
+  .pos-tbl td:first-child{white-space:normal}
   /* ===== baris pembelian: tanggal · supplier · total · deskripsi ===== */
   .bl-list{display:flex;flex-direction:column;gap:8px}
   .bl-head{display:none}
@@ -490,6 +499,12 @@ async function getSaldo(){
     else if(t.tipe==="mutasi"){ rek-=j; tunai+=j; } }
   return { tunai, rek, owner };
 }
+function katNama(t){
+  if(t.kategori==="kasbon") return t.tipe==="masuk"?"Pengembalian Kasbon":"Kasbon Diberikan";
+  if(t.kategori==="bank") return t.tipe==="masuk"?"Bunga Bank":"Biaya Bank";
+  return {modal:"Modal",gaji:"Gaji",material:"Material",jasa:"Jasa",lain:"Lainnya"}[t.kategori]||t.kategori;
+}
+function posChip(t){ const a=akunLabel(t.akun); if(t.kategori==="kasbon") return (t.tipe==="masuk"?"masuk ke ":"diambil dari ")+a; return a; }
 function akunLabel(a){ return a==="tunai"?"Tunai":a==="owner"?"Kas Owner":"Rekening"; }
 function sumberDanaSelect(id, sel){
   const opt=(v,l)=>`<option value="${v}" ${sel===v?"selected":""}>${l}</option>`;
@@ -615,14 +630,14 @@ function buildRw(){
   d.tx.forEach(t=>{
     const j=Number(t.jumlah)||0; let delta, chip;
     if(pos==="semua"){ delta=t.tipe==="masuk"?j:t.tipe==="keluar"?-j:0; chip=t.tipe==="mutasi"?"Rekening → Tunai":akunLabel(t.akun); }
-    else if(pos==="kasbon"){ if(t.kategori!=="kasbon") return; delta=t.tipe==="keluar"?j:-j; chip=t.tipe==="keluar"?"Ambil kasbon":"Bayar kasbon"; }
+    else if(pos==="kasbon"){ if(t.kategori!=="kasbon") return; delta=t.tipe==="keluar"?j:-j; chip=t.tipe==="keluar"?("Diambil dari "+akunLabel(t.akun)):("Masuk ke "+akunLabel(t.akun)); }
     else if(t.tipe==="mutasi"){ if(pos==="tunai") delta=j; else if(pos==="rek") delta=-j; else return; chip="Mutasi"; }
     else { const k=t.akun==="tunai"?"tunai":t.akun==="owner"?"owner":"rek"; if(k!==pos) return; delta=t.tipe==="masuk"?j:-j; chip=t.kategori==="kasbon"?"Kasbon":""; }
     rows.push({tgl:t.tanggal||"",cr:t.created_at||"",amt:j,judul:transaksiTitle(t),ket:t.keterangan||"",delta,void:t.status==="void",chip,tid:t.tukang_id||"",mut:t.tipe==="mutasi"});
   });
   if(pos==="kasbon"){
     d.pd.forEach(x=>{ const kb=Number(x.kasbon)||0; const p=pmap[x.payroll_id]; if(kb<=0||!p) return;
-      rows.push({tgl:gajiTgl[x.payroll_id]||p.periode_selesai||"",cr:p.finalized_at||"",judul:"Potong gaji · "+(x.nama||namaTukang(x.tukang_id)),ket:"Slip "+fmtTgl(p.periode_mulai)+" – "+fmtTgl(p.periode_selesai),delta:-kb,void:false,chip:"Potong gaji",tid:x.tukang_id||"",mut:false}); });
+      rows.push({tgl:p.periode_selesai||gajiTgl[x.payroll_id]||"",cr:p.finalized_at||"",judul:"Potong gaji · "+(x.nama||namaTukang(x.tukang_id)),ket:"Slip "+fmtTgl(p.periode_mulai)+" – "+fmtTgl(p.periode_selesai),delta:-kb,void:false,chip:"Potong dari slip gaji",tid:x.tukang_id||"",mut:false}); });
   }
   rows.sort((a,b)=>a.tgl.localeCompare(b.tgl)||a.cr.localeCompare(b.cr));
   kasRwAll=rows;
@@ -709,17 +724,17 @@ function renderKas(){
 }
 function transaksiTitle(t){
   const nm=t.tukang_id?namaTukang(t.tukang_id):(t.supplier_id?namaSupplier(t.supplier_id):"");
-  const kat={modal:"Modal",gaji:"Gaji",kasbon:"Kasbon",material:"Material",jasa:"Jasa",bank:"Bank",lain:"Lainnya"}[t.kategori]||t.kategori;
+  const kat=katNama(t);
   if(t.tipe==="mutasi") return "Mutasi Rekening → Tunai";
   return kat+(nm?(" · "+nm):"");
 }
 function txItem(t){
   const nm=t.tukang_id?namaTukang(t.tukang_id):(t.supplier_id?namaSupplier(t.supplier_id):"");
-  const kat={modal:"Modal",gaji:"Gaji",kasbon:"Kasbon",material:"Material",jasa:"Jasa",bank:"Bank",lain:"Lainnya"}[t.kategori]||t.kategori;
+  const kat=katNama(t);
   let title,cls,amt,chips;
   if(t.tipe==="mutasi"){ title="Mutasi"; cls="amt-mut"; amt=rupiah(t.jumlah); chips=`<span class="chip">Rekening → Tunai</span>`; }
-  else if(t.tipe==="masuk"){ title=kat; cls="amt-pos"; amt="+ "+rupiah(t.jumlah); chips=`<span class="chip">${akunLabel(t.akun)}</span>`; }
-  else { title=kat+(nm?(" · "+nm):""); cls="amt-neg"; amt="− "+rupiah(t.jumlah); chips=`<span class="chip">${akunLabel(t.akun)}</span>`; }
+  else if(t.tipe==="masuk"){ title=kat+((t.kategori==="kasbon"&&nm)?(" · "+nm):""); cls="amt-pos"; amt="+ "+rupiah(t.jumlah); chips=`<span class="chip">${posChip(t)}</span>`; }
+  else { title=kat+(nm?(" · "+nm):""); cls="amt-neg"; amt="− "+rupiah(t.jumlah); chips=`<span class="chip">${posChip(t)}</span>`; }
   const ket=t.keterangan?(" · "+esc(t.keterangan)):"";
   let act="";
   const eligible = t.status==="aktif" && (!t.payroll_id || t.kategori==="gaji");
@@ -847,7 +862,7 @@ async function openKasbon(){
     <div style="font-size:13px;color:var(--muted);margin-bottom:12px">Saldo tunai ${rupiah(s.tunai)} · rekening ${rupiah(s.rek)}</div>
     <div class="field"><label>Tukang</label><select id="kb-tukang">${opts}</select></div>
     <div class="field"><label>Tanggal</label><input id="kb-tgl" type="date" value="${todayStr()}"></div>
-    <div class="field"><label>Sumber dana</label><select id="kb-akun"><option value="tunai">Kas Tunai</option><option value="rekening">Kas Rekening</option></select></div>
+    <div class="field"><label>Kasbon diambil dari pos</label><select id="kb-akun"><option value="tunai">Kas Tunai</option><option value="rekening">Kas Rekening</option><option value="owner">Kas Owner</option></select></div>
     <div class="field"><label>Jumlah (Rp)</label><input id="kb-jumlah" class="num" data-num="int" data-hint="kb-hint" type="text" inputmode="numeric" placeholder="0"><div class="hint" id="kb-hint"></div></div>
     <div class="field"><label>Keterangan</label><input id="kb-ket" type="text" placeholder="opsional"></div>`,
     `<button class="btn ghost" onclick="closeModal()">Batal</button><button class="btn primary" onclick="simpanKasbon()">Simpan kasbon</button>`);
@@ -856,11 +871,11 @@ async function simpanKasbon(){
   const tukang_id=$("kb-tukang").value, jumlah=numVal($("kb-jumlah")), akun=$("kb-akun").value;
   if(jumlah<=0){ toast("Jumlah harus > 0","err"); return; }
   const s=await getSaldo();
-  if((akun==="tunai"?s.tunai:s.rek)<jumlah){ toast("Saldo "+(akun==="tunai"?"tunai":"rekening")+" tidak cukup","err"); return; }
+  if(akun!=="owner" && (akun==="tunai"?s.tunai:s.rek)<jumlah){ toast("Saldo "+(akun==="tunai"?"tunai":"rekening")+" tidak cukup","err"); return; }
   const payload={tanggal:$("kb-tgl").value||todayStr(),tipe:"keluar",akun,kategori:"kasbon",jumlah,tukang_id,keterangan:$("kb-ket").value.trim()||("Kasbon "+namaTukang(tukang_id)),dibuat_oleh:me.id};
   const { error }=await sb.from("transaksi").insert(payload);
   if(error){ console.log(error); toast("Gagal menyimpan","err"); return; }
-  closeModal(); toast("Kasbon tersimpan","ok"); logAct("Kasbon","Beri kasbon "+rupiah(jumlah)+" ke "+namaTukang(tukang_id)); await loadTx(); renderKas();
+  closeModal(); toast("Kasbon tersimpan","ok"); logAct("Kasbon","Beri kasbon "+rupiah(jumlah)+" ke "+namaTukang(tukang_id)+" (dari "+akunLabel(akun)+")"); await loadTx(); renderKas();
 }
 
 /* --- bayar/cicil kasbon di luar proses gaji --- */
@@ -875,7 +890,7 @@ async function openBayarKasbon(){
     <p style="font-size:13px;color:var(--muted);margin:0 0 12px">Untuk pelunasan atau cicilan kasbon yang dibayar langsung tukang, di luar potongan gaji mingguan — bisa dicatat kapan saja.</p>
     <div class="field"><label>Tukang</label><select id="pk-tukang" onchange="pkSisaUpdate()">${optHtml}</select></div>
     <div class="field"><label>Jumlah dibayar (Rp)</label><input id="pk-jumlah" class="num" data-num="int" data-hint="pk-hint" type="text" inputmode="numeric" value="${opts[0].sisa}"><div class="hint" id="pk-hint">= ${rupiah(opts[0].sisa)} · sisa hutang ${esc(opts[0].nama)}: ${rupiah(opts[0].sisa)}</div></div>
-    <div class="field"><label>Diterima ke</label><select id="pk-akun"><option value="tunai">Kas Tunai</option><option value="rekening">Kas Rekening</option></select></div>
+    <div class="field"><label>Pengembalian masuk ke pos</label><select id="pk-akun"><option value="tunai">Kas Tunai</option><option value="rekening">Kas Rekening</option><option value="owner">Kas Owner</option></select></div>
     <div class="field"><label>Tanggal</label><input id="pk-tgl" type="date" value="${todayStr()}"></div>
     <div class="field"><label>Keterangan</label><input id="pk-ket" type="text" placeholder="opsional"></div>`,
     `<button class="btn ghost" onclick="closeModal()">Batal</button><button class="btn primary" onclick="simpanBayarKasbon()">Simpan</button>`);
@@ -891,7 +906,7 @@ async function simpanBayarKasbon(){
   const payload={tanggal:$("pk-tgl").value||todayStr(),tipe:"masuk",akun:$("pk-akun").value,kategori:"kasbon",jumlah,tukang_id,keterangan:$("pk-ket").value.trim()||("Pembayaran kasbon "+namaTukang(tukang_id)),dibuat_oleh:me.id};
   const { error }=await sb.from("transaksi").insert(payload);
   if(error){ console.log(error); toast("Gagal menyimpan","err"); return; }
-  closeModal(); toast("Pembayaran kasbon tercatat","ok"); logAct("Kasbon","Terima pembayaran kasbon "+rupiah(jumlah)+" dari "+namaTukang(tukang_id)); await loadTx(); renderKas();
+  closeModal(); toast("Pembayaran kasbon tercatat","ok"); logAct("Kasbon","Terima pengembalian kasbon "+rupiah(jumlah)+" dari "+namaTukang(tukang_id)+" (masuk ke "+akunLabel(payload.akun)+")"); await loadTx(); renderKas();
 }
 function openModalIncome(){
   openModal("Tambah Modal / Saldo Awal",`
@@ -1557,9 +1572,13 @@ async function buildLaporan(){
   let det=[]; if(prIds.length){ const r=await sb.from("payroll_detail").select("*").in("payroll_id",prIds); det=r.data||[]; }
   const { data:tx }=await sb.from("transaksi").select("*").gte("tanggal",a).lte("tanggal",b);
   const { data:prev }=await sb.from("transaksi").select("tipe,akun,jumlah").eq("status","aktif").lt("tanggal",a);
-  const { data:kasbonAll }=await sb.from("transaksi").select("tukang_id,jumlah").eq("kategori","kasbon").eq("tipe","keluar").eq("status","aktif");
-  const { data:bayarAll }=await sb.from("transaksi").select("tukang_id,jumlah").eq("kategori","kasbon").eq("tipe","masuk").eq("status","aktif");
-  const { data:dedAll }=await sb.from("payroll_detail").select("tukang_id,kasbon").gt("kasbon",0);
+  const [kbTx, prAll, pdAll]=await Promise.all([
+    fetchAllRows("transaksi","tukang_id,tipe,jumlah,tanggal,akun,keterangan,created_at","created_at",q=>q.eq("kategori","kasbon").eq("status","aktif")),
+    fetchAllRows("payroll","id,periode_mulai,periode_selesai","created_at"),
+    fetchAllRows("payroll_detail","payroll_id,tukang_id,nama,kasbon","id",q=>q.gt("kasbon",0))
+  ]);
+  const prMap={}; (prAll||[]).forEach(x=>prMap[x.id]=x);
+  const kbPot=(pdAll||[]).filter(d=>prMap[d.payroll_id]).map(d=>({tukang_id:d.tukang_id,nama:d.nama,kasbon:Number(d.kasbon)||0,tgl:prMap[d.payroll_id].periode_selesai,mulai:prMap[d.payroll_id].periode_mulai}));
   const logRows = me.role==="owner" ? (await sb.from("log_aktivitas").select("*").gte("waktu",a+"T00:00:00").lte("waktu",b+"T23:59:59").order("waktu",{ascending:false}).limit(300)).data : [];
   const [beliAll, payAll]=await Promise.all([
     fetchAllRows("pembelian","*","created_at",q=>q.eq("status","disetujui")),
@@ -1569,7 +1588,7 @@ async function buildLaporan(){
   const beliRows=(beliAll||[]).filter(x=>{ const d=beliTgl(x); return d>=a&&d<=b; });
   const orphan=(tx||[]).filter(t=>(t.kategori==="material"||t.kategori==="jasa")&&t.status==="aktif"&&!t.pembelian_id).map(t=>{ const id="tx-"+t.id; bayarMap[id]=[{jumlah:t.jumlah,tanggal:t.tanggal,akun:t.akun}]; return {id,item:t.keterangan||"(pembayaran tanpa catatan pembelian)",supplier_id:t.supplier_id,total:Number(t.jumlah)||0,qty:0,satuan:"",harga_satuan:0,status:"disetujui",sudah_dibayar:true,sudah_datang:true,jenis:t.kategori==="jasa"?"jasa":"barang",tgl_pengajuan:t.tanggal}; });
   const beli=[...beliRows,...orphan].sort((x,y)=>beliTgl(y).localeCompare(beliTgl(x)));
-  repData={ a,b, beli, payrolls:pr||[], details:det, tx:tx||[], prev:prev||[], kasbonAll:kasbonAll||[], bayarAll:bayarAll||[], dedAll:dedAll||[], log:logRows||[] };
+  repData={ a,b, beli, payrolls:pr||[], details:det, tx:tx||[], prev:prev||[], kbTx:kbTx||[], kbPot, log:logRows||[] };
   renderLaporanBody();
 }
 function renderLaporanBody(){
@@ -1584,8 +1603,25 @@ function repTukang(){
   det.forEach(d=>{ const k=d.tukang_id||d.nama; if(!map[k])map[k]={nama:d.nama,bruto:0,kasbon:0,bersih:0}; map[k].bruto+=(Number(d.upah_dasar)||0)+(Number(d.lembur)||0)+(Number(d.tambahan)||0); map[k].kasbon+=Number(d.kasbon)||0; map[k].bersih+=Number(d.gaji_bersih)||0; });
   const rows=Object.values(map).sort((a,b)=>(a.nama||"").localeCompare(b.nama||""));
   let tB=0,tK=0,tN=0;
-  const body=rows.map(r=>{ tB+=r.bruto;tK+=r.kasbon;tN+=r.bersih; return `<div class="tx"><div class="l"><div class="k">${esc(r.nama)}</div><div class="d">Kasbon ${rupiah(r.kasbon)} · bersih ${rupiah(r.bersih)}</div></div><div class="r"><div class="a tnum">${rupiah(r.bruto)}</div></div></div>`; }).join("");
-  return `<div class="bigtotal"><div class="l">TOTAL UPAH TUKANG (BRUTO)</div><div class="v tnum">${rupiah(tB)}</div><div class="s">Kasbon ${rupiah(tK)} · dibayar bersih ${rupiah(tN)}</div></div><div class="list" style="margin-top:8px">${body}</div>`;
+  const body=rows.map(r=>{ tB+=r.bruto;tK+=r.kasbon;tN+=r.bersih; return `<div class="tx"><div class="l"><div class="k">${esc(r.nama)}</div><div class="d">Upah bruto ${rupiah(r.bruto)}${r.kasbon?` − potong kasbon ${rupiah(r.kasbon)}`:""}</div></div><div class="r"><div class="a tnum">${rupiah(r.bersih)}</div><span class="chip">dibayar</span></div></div>`; }).join("");
+  const kb=kasbonAgg().T;
+  const gajiKas=repData.tx.filter(t=>t.kategori==="gaji"&&t.tipe==="keluar"&&t.status==="aktif").reduce((a,t)=>a+(Number(t.jumlah)||0),0);
+  const selisih=gajiKas-tN;
+  const kasNeto=tN+kb.beri-kb.ret;
+  const ln=(l,v,c)=>`<div style="display:flex;justify-content:space-between;font-size:13px;padding:3px 0"><span style="color:var(--muted)">${l}</span><b class="tnum"${c?` style="color:${c}"`:""}>${v}</b></div>`;
+  const rekon=`<div class="card" style="margin-top:10px">
+    <div style="font-weight:700;margin-bottom:6px">Rekonsiliasi dengan buku kas</div>
+    ${ln("Upah bruto (beban upah)",rupiah(tB))}
+    ${ln("− Potong kasbon (tanpa kas)","− "+rupiah(tK),"var(--pos)")}
+    ${ln("= Gaji bersih dibayar (slip)",rupiah(tN))}
+    ${ln("Gaji tercatat di Kas pada periode ini",rupiah(gajiKas))}
+    ${Math.abs(selisih)>0.5?`<div style="font-size:12px;color:#92400E;background:#FEF3C7;border-radius:8px;padding:7px 9px;margin:4px 0">Selisih ${rupiah(Math.abs(selisih))}: ada slip yang dibayar di luar rentang tanggal periode (slip dipilih menurut tanggal akhir minggu, kas menurut tanggal bayar).</div>`:`<div style="font-size:12px;color:var(--pos);margin:2px 0">✓ Sesuai dengan catatan Kas</div>`}
+    <div style="border-top:1px solid var(--line);margin:8px 0 4px"></div>
+    ${ln("+ Kasbon diberikan (kas keluar)",rupiah(kb.beri),"var(--neg)")}
+    ${ln("− Pengembalian kasbon (kas masuk)","− "+rupiah(kb.ret),"var(--pos)")}
+    <div style="display:flex;justify-content:space-between;font-size:14px;padding-top:6px;border-top:1px solid var(--line);margin-top:6px"><span style="font-weight:700">Kas keluar neto untuk tukang</span><b class="tnum">${rupiah(kasNeto)}</b></div>
+  </div>`;
+  return `<div class="bigtotal"><div class="l">GAJI BERSIH DIBAYAR KE TUKANG</div><div class="v tnum">${rupiah(tN)}</div><div class="s">Upah bruto ${rupiah(tB)} − potong kasbon ${rupiah(tK)}</div></div>${rekon}<h4 class="sec">Per tukang</h4><div class="list">${body}</div>`;
 }
 function paidEff(p){ return isLunas(p)?(Number(p.total)||0):Math.min(paidOf(p),Number(p.total)||0); }
 function supplierAgg(){
@@ -1609,32 +1645,45 @@ function repSupplier(){
 }
 function repTxLine(t){
   const nm=t.tukang_id?namaTukang(t.tukang_id):(t.supplier_id?namaSupplier(t.supplier_id):"");
-  const kat={modal:"Modal",gaji:"Gaji",kasbon:"Kasbon",material:"Material",jasa:"Jasa",bank:"Bank",lain:"Lainnya"}[t.kategori]||t.kategori;
+  const kat=katNama(t);
   let title,cls,amt;
   if(t.tipe==="mutasi"){ title="Mutasi → Tunai"; cls="amt-mut"; amt=rupiah(t.jumlah); }
   else if(t.tipe==="masuk"){ title=kat; cls="amt-pos"; amt="+ "+rupiah(t.jumlah); }
   else { title=kat+(nm?(" · "+nm):""); cls="amt-neg"; amt="− "+rupiah(t.jumlah); }
-  return `<div class="tx"><div class="l"><div class="k">${esc(title)}</div><div class="d">${fmtTgl(t.tanggal)}${t.keterangan?(" · "+esc(t.keterangan)):""}</div></div><div class="r"><div class="a ${cls}">${amt}</div></div></div>`;
+  if(t.tipe==="masuk"&&t.kategori==="kasbon"&&nm) title=kat+" · "+nm;
+  return `<div class="tx"><div class="l"><div class="k">${esc(title)}</div><div class="d">${fmtTgl(t.tanggal)}${t.tipe!=="mutasi"?(" · "+posChip(t)):""}${t.keterangan?(" · "+esc(t.keterangan)):""}</div></div><div class="r"><div class="a ${cls}">${amt}</div></div></div>`;
 }
+function posKey(a){ return a==="tunai"?"tunai":a==="owner"?"owner":"rek"; }
+function kasbonAgg(){
+  const a=repData.a,b=repData.b,m={};
+  const G=k=>m[k]||(m[k]={id:k,nama:k!=="-"?namaTukang(k):"(tanpa tukang)",awal:0,beri:0,ret:0,pot:0,akhir:0,beriPos:{tunai:0,rek:0,owner:0},retPos:{tunai:0,rek:0,owner:0}});
+  const hist=[];
+  (repData.kbTx||[]).forEach(t=>{ const j=Number(t.jumlah)||0, g=G(t.tukang_id||"-"), out=t.tipe==="keluar", d=t.tanggal||"";
+    if(d<a){ g.awal+=out?j:-j; }
+    else if(d<=b){ if(out){ g.beri+=j; g.beriPos[posKey(t.akun)]+=j; } else { g.ret+=j; g.retPos[posKey(t.akun)]+=j; }
+      hist.push({tgl:d,cr:t.created_at||"",nama:g.nama,jenis:out?"Kasbon diberikan":"Pengembalian kasbon",pos:out?("Dari "+akunLabel(t.akun)):("Ke "+akunLabel(t.akun)),ket:t.keterangan||"",amt:out?j:-j}); }
+  });
+  (repData.kbPot||[]).forEach(x=>{ const g=G(x.tukang_id||"-"), d=x.tgl||"";
+    if(d<a){ g.awal-=x.kasbon; }
+    else if(d<=b){ g.pot+=x.kasbon; hist.push({tgl:d,cr:"",nama:x.nama||g.nama,jenis:"Potong gaji",pos:"Slip gaji (tanpa kas)",ket:"Slip "+fmtTgl(x.mulai)+" – "+fmtTgl(x.tgl),amt:-x.kasbon}); }
+  });
+  const rows=Object.values(m).map(g=>{ g.awal=Math.round(g.awal); g.akhir=Math.round(g.awal+g.beri-g.ret-g.pot); return g; })
+    .filter(g=>g.awal||g.beri||g.ret||g.pot||g.akhir).sort((x,y)=>y.akhir-x.akhir||y.beri-x.beri||x.nama.localeCompare(y.nama));
+  const T=rows.reduce((o,g)=>({awal:o.awal+g.awal,beri:o.beri+g.beri,ret:o.ret+g.ret,pot:o.pot+g.pot,akhir:o.akhir+g.akhir,beriPos:{tunai:o.beriPos.tunai+g.beriPos.tunai,rek:o.beriPos.rek+g.beriPos.rek,owner:o.beriPos.owner+g.beriPos.owner},retPos:{tunai:o.retPos.tunai+g.retPos.tunai,rek:o.retPos.rek+g.retPos.rek,owner:o.retPos.owner+g.retPos.owner}}),{awal:0,beri:0,ret:0,pot:0,akhir:0,beriPos:{tunai:0,rek:0,owner:0},retPos:{tunai:0,rek:0,owner:0}});
+  hist.sort((x,y)=>y.tgl.localeCompare(x.tgl)||y.cr.localeCompare(x.cr));
+  return {rows,T,hist};
+}
+function posRingkas(o){ const L=[]; if(o.tunai)L.push("Tunai "+rupiah(o.tunai)); if(o.rek)L.push("Rekening "+rupiah(o.rek)); if(o.owner)L.push("Kas Owner "+rupiah(o.owner)); return L.join(" · "); }
 function repKasbon(){
-  const ambil=repData.tx.filter(t=>t.kategori==="kasbon"&&t.tipe==="keluar"&&t.status==="aktif");
-  const bayar=repData.tx.filter(t=>t.kategori==="kasbon"&&t.tipe==="masuk"&&t.status==="aktif");
-  const out={};
-  (repData.kasbonAll||[]).forEach(t=>{ if(t.tukang_id) out[t.tukang_id]=(out[t.tukang_id]||0)+(Number(t.jumlah)||0); });
-  (repData.bayarAll||[]).forEach(t=>{ if(t.tukang_id) out[t.tukang_id]=(out[t.tukang_id]||0)-(Number(t.jumlah)||0); });
-  (repData.dedAll||[]).forEach(d=>{ if(d.tukang_id) out[d.tukang_id]=(out[d.tukang_id]||0)-(Number(d.kasbon)||0); });
-  const map={};
-  const G=k=>{ if(!map[k])map[k]={nama:k!=="-"?namaTukang(k):"(tanpa tukang)",ambil:0,bayar:0,sisa:0}; return map[k]; };
-  ambil.forEach(t=>{ const k=t.tukang_id||"-"; G(k).ambil+=Number(t.jumlah)||0; });
-  bayar.forEach(t=>{ const k=t.tukang_id||"-"; G(k).bayar+=Number(t.jumlah)||0; });
-  Object.keys(out).forEach(k=>{ if(out[k]>0) G(k).sisa=Math.round(out[k]); });
-  const rows=Object.values(map).sort((a,b)=>b.sisa-a.sisa||b.ambil-a.ambil);
+  const { rows, T, hist }=kasbonAgg();
   if(!rows.length) return `<div class="empty">Tidak ada kasbon.</div>`;
-  let gA=0,gB=0,gS=0;
-  const body=rows.map(r=>{ gA+=r.ambil; gB+=r.bayar; gS+=r.sisa;
-    const parts=[]; if(r.ambil) parts.push("ambil "+rupiah(r.ambil)); if(r.bayar) parts.push("bayar "+rupiah(r.bayar));
-    return `<div class="tx"><div class="l"><div class="k">${esc(r.nama)}</div><div class="d">${parts.length?parts.join(" · "):"–"}</div></div><div class="r"><div class="a tnum ${r.sisa?'due':''}">${r.sisa?("sisa "+rupiah(r.sisa)):"lunas"}</div></div></div>`; }).join("");
-  return `<div class="bigtotal"><div class="l">SISA HUTANG KASBON (BELUM DIPOTONG)</div><div class="v tnum">${rupiah(gS)}</div><div class="s">Diambil periode ini: ${rupiah(gA)} · dibayar: ${rupiah(gB)}</div></div><div class="list" style="margin-top:8px">${body}</div>`;
+  const sum=`<div class="rw-sum"><div><div class="lbl">Hutang awal periode</div><div class="v tnum">${rupiah(T.awal)}</div></div><div><div class="lbl">+ Kasbon diberikan</div><div class="v tnum" style="color:var(--neg)">${rupiah(T.beri)}</div></div><div><div class="lbl">− Pengembalian langsung</div><div class="v tnum" style="color:var(--pos)">${rupiah(T.ret)}</div></div><div><div class="lbl">− Dipotong dari gaji</div><div class="v tnum" style="color:var(--pos)">${rupiah(T.pot)}</div></div><div><div class="lbl">= Hutang akhir periode</div><div class="v tnum" style="font-size:16px">${rupiah(T.akhir)}</div></div></div>
+    <div style="font-size:12.5px;color:var(--muted);margin:-4px 2px 12px;line-height:1.55">${T.beri?`Kasbon diberikan dari: ${posRingkas(T.beriPos)}<br>`:""}${T.ret?`Pengembalian masuk ke: ${posRingkas(T.retPos)}<br>`:""}${T.pot?`Potongan gaji tidak menggerakkan kas (hanya mengurangi hutang).`:""}</div>`;
+  const body=rows.map(r=>{
+    const parts=[]; if(r.awal)parts.push("awal "+rupiah(r.awal)); if(r.beri)parts.push("+ diberikan "+rupiah(r.beri)); if(r.ret)parts.push("− kembali "+rupiah(r.ret)); if(r.pot)parts.push("− potong gaji "+rupiah(r.pot));
+    return `<div class="tx"><div class="l"><div class="k">${esc(r.nama)}</div><div class="d">${parts.length?parts.join(" · "):"–"}</div></div><div class="r"><div class="a tnum ${r.akhir>0?'due':''}">${r.akhir>0?("sisa "+rupiah(r.akhir)):(r.akhir<0?("lebih bayar "+rupiah(-r.akhir)):"lunas")}</div></div></div>`; }).join("");
+  const hl=hist.map(h=>`<div class="tx"><div class="l"><div class="k">${esc(h.jenis)} · ${esc(h.nama)}</div><div class="d">${fmtTgl(h.tgl)} · ${esc(h.pos)}${h.ket?(" · "+esc(h.ket)):""}</div></div><div class="r"><div class="a tnum ${h.amt>0?'amt-neg':'amt-pos'}">${h.amt>0?"+ ":"− "}${rupiah(Math.abs(h.amt))}</div></div></div>`).join("");
+  return `${sum}<h4 class="sec">Per tukang</h4><div class="list">${body}</div><h4 class="sec">Rincian kasbon & pengembalian (${hist.length})</h4><div class="list">${hl||'<div class="empty">Tidak ada pergerakan kasbon pada periode ini.</div>'}</div>`;
 }
 function fmtWaktu(iso){ if(!iso) return "-"; const d=new Date(iso); return d.toLocaleDateString("id-ID",{day:"2-digit",month:"short"})+" "+d.toLocaleTimeString("id-ID",{hour:"2-digit",minute:"2-digit"}); }
 function repLog(){
@@ -1654,7 +1703,7 @@ function repOwner(){
   const totalNet=owner.reduce((s,t)=>s+(t.tipe==="masuk"?(Number(t.jumlah)||0):-(Number(t.jumlah)||0)),0);
   const list=owner.slice().sort((a,b)=> a.tanggal<b.tanggal?1:(a.tanggal>b.tanggal?-1:0)).map(t=>{
     const nm=t.supplier_id?namaSupplier(t.supplier_id):"";
-    const kat={modal:"Modal",material:"Material",jasa:"Jasa",lain:"Lainnya"}[t.kategori]||t.kategori;
+    const kat=katNama(t);
     const title=kat+(nm?(" · "+nm):"");
     const amt=t.tipe==="masuk"?("+ "+rupiah(t.jumlah)):("− "+rupiah(t.jumlah));
     const cls=t.tipe==="masuk"?"amt-pos":"amt-neg";
@@ -1666,25 +1715,42 @@ function repOwner(){
 }
 function repKas(){
   const aktif=repData.tx.filter(t=>t.status==="aktif");
-  let oT=0,oR=0; repData.prev.forEach(t=>{ const j=Number(t.jumlah)||0; if(t.tipe==="masuk"){t.akun==="tunai"?oT+=j:oR+=j;} else if(t.tipe==="keluar"){t.akun==="tunai"?oT-=j:oR-=j;} else if(t.tipe==="mutasi"){oR-=j;oT+=j;} });
-  let mR=0,mT=0,kR=0,kT=0,mut=0; const byKat={};
-  aktif.forEach(t=>{ const j=Number(t.jumlah)||0; if(t.tipe==="masuk"){t.akun==="tunai"?mT+=j:mR+=j;} else if(t.tipe==="keluar"){t.akun==="tunai"?kT+=j:kR+=j; byKat[t.kategori]=(byKat[t.kategori]||0)+j;} else if(t.tipe==="mutasi"){mut+=j;} });
-  const cR=oR+mR-kR-mut, cT=oT+mT+mut-kT;
-  const katL={modal:"Modal",gaji:"Gaji",kasbon:"Kasbon",material:"Material",jasa:"Jasa",bank:"Bank",lain:"Lainnya"};
-  const katRows=Object.keys(byKat).sort((x,y)=>byKat[y]-byKat[x]).map(k=>`<div class="tx"><div class="l"><div class="k">${katL[k]||k}</div></div><div class="r"><div class="a amt-neg">− ${rupiah(byKat[k])}</div></div></div>`).join("");
+  const open={tunai:0,rek:0};
+  repData.prev.forEach(t=>{ const j=Number(t.jumlah)||0; if(t.tipe==="mutasi"){ open.rek-=j; open.tunai+=j; } else { const k=posKey(t.akun); if(k!=="owner") open[k]+=(t.tipe==="masuk"?j:-j); } });
+  const M={}; const add=(r,k,v)=>{ (M[r]=M[r]||{rek:0,tunai:0,owner:0})[k]+=v; };
+  aktif.forEach(t=>{ const j=Number(t.jumlah)||0;
+    if(t.tipe==="mutasi"){ add("mut","rek",-j); add("mut","tunai",j); return; }
+    const k=posKey(t.akun);
+    if(t.tipe==="masuk") add(t.kategori==="kasbon"?"in_kasbon":t.kategori==="bank"?"in_bank":"in_modal",k,j);
+    else add("out_"+t.kategori,k,j);
+  });
+  const sumRows=(pref)=>Object.keys(M).filter(r=>r.startsWith(pref));
+  const tot=(rows,k)=>rows.reduce((a,r)=>a+M[r][k],0);
+  const inRows=["in_modal","in_kasbon","in_bank"].filter(r=>M[r]);
+  const outOrder=["out_gaji","out_kasbon","out_material","out_jasa","out_bank","out_lain","out_modal"]; const outRows=outOrder.filter(r=>M[r]);
+  const L={in_modal:"Modal / dana masuk",in_kasbon:"Pengembalian kasbon",in_bank:"Bunga bank",out_gaji:"Gaji tukang (dibayar)",out_kasbon:"Kasbon diberikan",out_material:"Material",out_jasa:"Jasa",out_bank:"Biaya bank",out_lain:"Lainnya",out_modal:"Modal keluar"};
+  const K=["rek","tunai","owner"];
+  const fm=v=>v?rupiah(v):"–";
+  const tr=(label,vals,cls,fmt)=>`<tr class="${cls||""}"><td>${label}</td>${K.map(k=>`<td class="n">${fmt?fmt(vals[k],k):fm(vals[k])}</td>`).join("")}</tr>`;
+  const inT={},outT={},closing={};
+  K.forEach(k=>{ inT[k]=tot(inRows,k); outT[k]=tot(outRows,k); });
+  const mutV=M.mut||{rek:0,tunai:0,owner:0};
+  K.forEach(k=>{ closing[k]=(k==="owner")?(inT[k]-outT[k]):((open[k]||0)+inT[k]-outT[k]+mutV[k]); });
+  let table=`<div style="overflow-x:auto"><table class="pos-tbl"><thead><tr><th></th><th class="n">Rekening</th><th class="n">Tunai</th><th class="n">Kas Owner</th></tr></thead><tbody>`;
+  table+=tr("Saldo awal",{rek:open.rek,tunai:open.tunai,owner:0},"strong",(v,k)=>k==="owner"?"–":rupiah(v));
+  table+=`<tr class="sec"><td colspan="4">Dana masuk</td></tr>`;
+  inRows.forEach(r=>{ table+=tr(L[r],M[r],r==="in_kasbon"?"hl":""); });
+  if(!inRows.length) table+=`<tr><td colspan="4" style="color:var(--muted)">–</td></tr>`;
+  table+=tr("Total masuk",inT,"strong");
+  table+=`<tr class="sec"><td colspan="4">Pengeluaran</td></tr>`;
+  outRows.forEach(r=>{ table+=tr(L[r],M[r],r==="out_kasbon"?"hl":""); });
+  if(!outRows.length) table+=`<tr><td colspan="4" style="color:var(--muted)">–</td></tr>`;
+  table+=tr("Total keluar",outT,"strong");
+  if(M.mut) table+=tr("Mutasi rekening → tunai",mutV,"",(v)=>v?((v>0?"+ ":"− ")+rupiah(Math.abs(v))):"–");
+  table+=tr(`Saldo akhir <span style="font-weight:500;color:var(--muted);font-size:11px">(Kas Owner = netto periode)</span>`,closing,"total",(v)=>rupiah(v));
+  table+=`</tbody></table></div>`;
   const list=aktif.slice().sort((a,b)=> a.tanggal<b.tanggal?1:(a.tanggal>b.tanggal?-1:0)).map(repTxLine).join("");
-  const ln=(lbl,val,col)=>`<div style="display:flex;justify-content:space-between;font-size:13px;padding:3px 0"><span style="color:var(--muted)">${lbl}</span><b class="tnum"${col?` style="color:${col}"`:""}>${val}</b></div>`;
-  return `
-    <div class="card" style="margin-bottom:10px">
-      ${ln("Saldo awal rekening",rupiah(oR))}
-      ${ln("Saldo awal tunai",rupiah(oT))}
-      ${ln("Dana masuk","+ "+rupiah(mR+mT),"var(--pos)")}
-      ${ln("Pengeluaran","− "+rupiah(kR+kT),"var(--neg)")}
-      ${ln("Mutasi ke tunai",rupiah(mut))}
-      <div style="border-top:1px solid var(--line);margin-top:6px;padding-top:8px;display:flex;justify-content:space-between;font-size:14px"><span style="font-weight:700">Saldo akhir rekening</span><b class="tnum">${rupiah(cR)}</b></div>
-      <div style="display:flex;justify-content:space-between;font-size:14px;padding-top:3px"><span style="font-weight:700">Saldo akhir tunai</span><b class="tnum">${rupiah(cT)}</b></div>
-    </div>
-    ${katRows?`<h4 class="sec">Pengeluaran per kategori</h4><div class="list">${katRows}</div>`:""}
+  return `<div class="card" style="margin-bottom:10px;padding:12px 10px">${table}<p style="font-size:11.5px;color:var(--muted);margin:8px 4px 0">Pengembalian kasbon dipisah dari modal; kasbon diberikan dipisah dari biaya lain. Kas Owner direset tiap awal bulan, jadi hanya ditampilkan sebagai netto.</p></div>
     <h4 class="sec">Rincian transaksi (${aktif.length})</h4>
     <div class="list">${list||'<div class="empty">Tidak ada transaksi.</div>'}</div>`;
 }
@@ -1692,7 +1758,9 @@ function laporanText(){
   if(!repData) return "";
   let bruto=0; repData.details.forEach(d=>{ bruto+=(Number(d.upah_dasar)||0)+(Number(d.lembur)||0)+(Number(d.tambahan)||0); });
   const { rows:sr, T:sT }=supplierAgg(); const matTotal=sT.total;
-  const L=["*LAPORAN PENGELUARAN*","Proyek Tukang","Periode: "+fmtTgl(repData.a)+" - "+fmtTgl(repData.b),"","UPAH TUKANG: "+rupiah(bruto),"","MATERIAL & JASA (per nota):"];
+  let potK=0,netT=0; repData.details.forEach(d=>{ potK+=Number(d.kasbon)||0; netT+=Number(d.gaji_bersih)||0; });
+  const kbT=kasbonAgg().T;
+  const L=["*LAPORAN PENGELUARAN*","Proyek Tukang","Periode: "+fmtTgl(repData.a)+" - "+fmtTgl(repData.b),"","UPAH TUKANG (bruto): "+rupiah(bruto),"- Potong kasbon: "+rupiah(potK),"- Gaji bersih dibayar: "+rupiah(netT),"- Kasbon diberikan: "+rupiah(kbT.beri)+" | dikembalikan: "+rupiah(kbT.ret),"- Sisa hutang kasbon (akhir periode): "+rupiah(kbT.akhir),"","MATERIAL & JASA (per nota):"];
   if(!sr.length) L.push("- (tidak ada)");
   sr.forEach(r=>{ L.push("- "+r.nama+": "+rupiah(r.total)+(r.sisa?" (sisa hutang "+rupiah(r.sisa)+")":"")); });
   L.push("Subtotal material & jasa: "+rupiah(matTotal),sT.sisa?("Belum dibayar: "+rupiah(sT.sisa)):"","*TOTAL: "+rupiah(bruto+matTotal)+"*");
@@ -1770,29 +1838,47 @@ function xlMaterial(wb,sub){
   xlSheet(wb,"Material & Jasa (Bayar)","PEMBAYARAN MATERIAL & JASA (KAS KELUAR)",sub,c3,r3,["","","","","TOTAL",tot]);
 }
 function xlKasbon(wb,sub){
-  const ambil=repData.tx.filter(t=>t.kategori==="kasbon"&&t.tipe==="keluar"&&t.status==="aktif");
-  const bayar=repData.tx.filter(t=>t.kategori==="kasbon"&&t.tipe==="masuk"&&t.status==="aktif");
-  const pmap={}; (repData.payrolls||[]).forEach(p=>pmap[p.id]=p);
-  const out={};
-  (repData.kasbonAll||[]).forEach(t=>{ if(t.tukang_id) out[t.tukang_id]=(out[t.tukang_id]||0)+(Number(t.jumlah)||0); });
-  (repData.bayarAll||[]).forEach(t=>{ if(t.tukang_id) out[t.tukang_id]=(out[t.tukang_id]||0)-(Number(t.jumlah)||0); });
-  (repData.dedAll||[]).forEach(d=>{ if(d.tukang_id) out[d.tukang_id]=(out[d.tukang_id]||0)-(Number(d.kasbon)||0); });
-  const map={}; const G=k=>map[k]||(map[k]={nama:k!=="-"?namaTukang(k):"(tanpa tukang)",ambil:0,bayar:0,potong:0,sisa:0});
-  ambil.forEach(t=>{ G(t.tukang_id||"-").ambil+=Number(t.jumlah)||0; });
-  bayar.forEach(t=>{ G(t.tukang_id||"-").bayar+=Number(t.jumlah)||0; });
-  (repData.details||[]).forEach(d=>{ if(d.tukang_id&&Number(d.kasbon)>0) G(d.tukang_id).potong+=Number(d.kasbon)||0; });
-  Object.keys(out).forEach(k=>{ if(out[k]>0) G(k).sisa=Math.round(out[k]); });
-  const rows=Object.values(map).sort((a,b)=>b.sisa-a.sisa||b.ambil-a.ambil);
-  const cols=[{h:"No",w:6},{h:"Nama Tukang",w:30},{h:"Kasbon Diambil (Rp)",w:21,num:1},{h:"Dibayar Tunai/Transfer (Rp)",w:26,num:1},{h:"Dipotong dari Gaji (Rp)",w:23,num:1},{h:"Sisa Hutang Saat Ini (Rp)",w:25,num:1},{h:"Status",w:11}];
-  const T=[0,0,0,0]; const o=rows.map((r,i)=>{ T[0]+=r.ambil;T[1]+=r.bayar;T[2]+=r.potong;T[3]+=r.sisa; return [i+1,r.nama,r.ambil,r.bayar,r.potong,r.sisa,r.sisa?"Belum lunas":"Lunas"]; });
-  xlSheet(wb,"Kasbon (Ringkasan)","LAPORAN KASBON TUKANG – RINGKASAN",sub+"  ·  'Sisa hutang' = total kasbon yang belum lunas per hari ini (semua waktu)",cols,o,["","TOTAL",...T,""]);
-  const det=[]; ambil.forEach(t=>det.push([t.tanggal,fmtTgl(t.tanggal),t.tukang_id?namaTukang(t.tukang_id):"-","Kasbon diambil",t.keterangan||"",Number(t.jumlah)||0]));
-  bayar.forEach(t=>det.push([t.tanggal,fmtTgl(t.tanggal),t.tukang_id?namaTukang(t.tukang_id):"-","Bayar kasbon",t.keterangan||"",-(Number(t.jumlah)||0)]));
-  (repData.details||[]).forEach(d=>{ if(Number(d.kasbon)>0){ const p=pmap[d.payroll_id]||{}; det.push([p.periode_selesai||"",p.periode_selesai?fmtTgl(p.periode_selesai):"",d.nama,"Potong gaji","Slip minggu "+(p.periode_mulai?fmtTgl(p.periode_mulai):"")+" – "+(p.periode_selesai?fmtTgl(p.periode_selesai):""),-(Number(d.kasbon)||0)]); } });
-  det.sort((a,b)=>(a[0]||"").localeCompare(b[0]||""));
-  const c2=[{h:"Tanggal",w:14},{h:"Nama Tukang",w:30},{h:"Jenis",w:17},{h:"Keterangan",w:46},{h:"Jumlah (Rp)  [+ ambil, – bayar/potong]",w:30,num:1}];
-  const net=det.reduce((a,r)=>a+r[5],0);
-  xlSheet(wb,"Kasbon (Detail)","LAPORAN KASBON TUKANG – RINCIAN TRANSAKSI",sub,c2,det.map(r=>[r[1],r[2],r[3],r[4],r[5]]),["","","","SELISIH BERSIH PERIODE",net]);
+  const { rows, T, hist }=kasbonAgg();
+  const cols=[{h:"No",w:6},{h:"Nama Tukang",w:30},{h:"Hutang Awal (Rp)",w:19,num:1},{h:"+ Kasbon Diberikan (Rp)",w:23,num:1},{h:"− Pengembalian Langsung (Rp)",w:27,num:1},{h:"− Dipotong dari Gaji (Rp)",w:24,num:1},{h:"= Hutang Akhir (Rp)",w:21,num:1},{h:"Status",w:13}];
+  const o=rows.map((r,i)=>[i+1,r.nama,r.awal,r.beri,r.ret,r.pot,r.akhir,r.akhir>0?"Belum lunas":(r.akhir<0?"Lebih bayar":"Lunas")]);
+  xlSheet(wb,"Kasbon (Ringkasan)","LAPORAN KASBON TUKANG – RINGKASAN",sub+"  ·  Hutang akhir = hutang awal + diberikan − pengembalian − potong gaji (per akhir periode)",cols,o,["","TOTAL",T.awal,T.beri,T.ret,T.pot,T.akhir,""]);
+  const det=hist.slice().reverse();
+  const c2=[{h:"Tanggal",w:14},{h:"Nama Tukang",w:28},{h:"Jenis",w:22},{h:"Pos (Dari / Ke)",w:26},{h:"Keterangan",w:40},{h:"Jumlah (Rp)  [+ hutang naik, − hutang turun]",w:34,num:1}];
+  const net=det.reduce((a,r)=>a+r.amt,0);
+  xlSheet(wb,"Kasbon (Detail)","LAPORAN KASBON TUKANG – RINCIAN TRANSAKSI",sub,c2,det.map(r=>[fmtTgl(r.tgl),r.nama,r.jenis,r.pos,r.ket,r.amt]),["","","","","PERUBAHAN HUTANG PERIODE",net]);
+}
+function xlRekon(wb,sub){
+  const det=repData.details||[]; let bruto=0,pot=0,net=0;
+  det.forEach(d=>{ bruto+=(Number(d.upah_dasar)||0)+(Number(d.lembur)||0)+(Number(d.tambahan)||0); pot+=Number(d.kasbon)||0; net+=Number(d.gaji_bersih)||0; });
+  const gajiKas=repData.tx.filter(t=>t.kategori==="gaji"&&t.tipe==="keluar"&&t.status==="aktif").reduce((a,t)=>a+(Number(t.jumlah)||0),0);
+  const { T }=kasbonAgg();
+  const R=[
+    ["▌ GAJI TUKANG",""],
+    ["Upah bruto (slip yang berakhir pada periode)",bruto],
+    ["− Potong kasbon (tidak menggerakkan kas)",-pot],
+    ["= Gaji bersih dibayar (menurut slip)",net],
+    ["Gaji keluar tercatat di buku Kas (menurut tanggal bayar)",gajiKas],
+    ["Selisih (slip vs kas) — 0 berarti sesuai",gajiKas-net],
+    ["▌ KASBON – POS ASAL / TUJUAN",""],
+    ["Kasbon diberikan – dari Kas Tunai",T.beriPos.tunai],
+    ["Kasbon diberikan – dari Kas Rekening",T.beriPos.rek],
+    ["Kasbon diberikan – dari Kas Owner",T.beriPos.owner],
+    ["Total kasbon diberikan (kas keluar)",T.beri],
+    ["Pengembalian kasbon – masuk ke Kas Tunai",T.retPos.tunai],
+    ["Pengembalian kasbon – masuk ke Kas Rekening",T.retPos.rek],
+    ["Pengembalian kasbon – masuk ke Kas Owner",T.retPos.owner],
+    ["Total pengembalian kasbon (kas masuk)",T.ret],
+    ["▌ KAS KELUAR NETO UNTUK TUKANG",""],
+    ["Gaji bersih dibayar + kasbon diberikan − pengembalian",net+T.beri-T.ret],
+    ["▌ POSISI HUTANG KASBON",""],
+    ["Hutang awal periode",T.awal],
+    ["+ Kasbon diberikan",T.beri],
+    ["− Pengembalian langsung",-T.ret],
+    ["− Dipotong dari gaji",-T.pot],
+    ["= Hutang akhir periode",T.akhir]
+  ];
+  const ws=xlSheet(wb,"Rekonsiliasi","REKONSILIASI GAJI, KASBON & KAS",sub,[{h:"Uraian",w:62},{h:"Jumlah (Rp)",w:22,num:1}],R);
+  R.forEach((r,i)=>{ const row=ws.getRow(5+i); if(String(r[0]).startsWith("▌")){ [1,2].forEach(c=>{ const cell=row.getCell(c); cell.font={bold:true,color:{argb:XL_NAVY}}; cell.fill={type:"pattern",pattern:"solid",fgColor:{argb:"FFD9E6F5"}}; }); } else if(/^=|^Total|^Gaji bersih dibayar \+|^Hutang awal/.test(r[0])){ row.getCell(1).font={bold:true}; row.getCell(2).font={bold:true}; } });
 }
 function bufToBase64(buf){ const u=new Uint8Array(buf); let bin=""; const ch=0x8000; for(let i=0;i<u.length;i+=ch) bin+=String.fromCharCode.apply(null,u.subarray(i,i+ch)); return btoa(bin); }
 async function exportExcel(){
@@ -1804,7 +1890,7 @@ async function exportExcel(){
     await loadExcelJS();
     const wb=new ExcelJS.Workbook(); wb.creator="Proyek AA"; wb.created=new Date();
     const sub="Periode: "+fmtTgl(repData.a)+" s/d "+fmtTgl(repData.b)+"  ·  Dicetak: "+fmtTgl(todayStr());
-    xlTukang(wb,sub); xlMaterial(wb,sub); xlKasbon(wb,sub);
+    xlRekon(wb,sub); xlTukang(wb,sub); xlMaterial(wb,sub); xlKasbon(wb,sub);
     const buf=await wb.xlsx.writeBuffer();
     const fname="laporan-proyek-"+repData.a+"_sd_"+repData.b+".xlsx";
     const AB=window.AndroidBridge;
