@@ -146,6 +146,35 @@
   .modal{background:#fff;width:100%;max-width:560px;border-radius:18px 18px 0 0;max-height:85vh;max-height:85svh;display:flex;flex-direction:column;animation:slideUp .18s ease;overflow:hidden}
   @keyframes slideUp{from{transform:translateY(24px);opacity:.6}to{transform:translateY(0);opacity:1}}
   @media(min-width:600px){.modal-overlay{align-items:center}.modal{border-radius:18px}}
+
+  /* ===== DESKTOP (>=1024px): sidebar kiri, konten lebar, huruf lebih besar ===== */
+  @media(min-width:1024px){
+    body{font-size:15.5px}
+    #app{padding-bottom:24px;padding-left:230px}
+    .topbar{padding:12px 28px 12px 24px}
+    .topbar .ttl{font-size:18px}
+    .botnav{top:62px;bottom:0;left:0;right:auto;width:230px;z-index:20;flex-direction:column;justify-content:flex-start;gap:4px;padding:16px 12px;border-top:0;border-right:1px solid var(--line);overflow-x:hidden;overflow-y:auto}
+    .nav-item{flex:0 0 auto;flex-direction:row;justify-content:flex-start;gap:14px;width:100%;min-width:0;padding:12px 14px;font-size:15px;border-radius:11px}
+    .nav-item:hover{background:#F1F5F9}
+    .nav-item.active{background:#E8F0FA}
+    .nav-item.active::before{top:10px;bottom:10px;left:0;width:4px;height:auto;border-radius:0 4px 4px 0}
+    .nav-item svg{width:22px;height:22px;flex-shrink:0}
+    .wrap{max-width:1180px;padding:28px 32px}
+    .page-head h2{font-size:24px}
+    h4.sec{font-size:13px}
+    .card{padding:22px}
+    .saldo-grid{gap:16px}
+    .list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+    .list>:not(.tx){grid-column:1/-1}
+    .tx{padding:14px 18px}
+    .seg button{font-size:14px;padding:11px 16px}
+    .bigtotal{padding:22px 26px}
+    .modal{max-width:680px}
+    .modal-overlay{align-items:center}.modal{border-radius:18px}
+    button.btn,.btn{font-size:15px}
+    input,select,textarea{font-size:15px}
+  }
+  @media(min-width:1500px){ .wrap{max-width:1360px} .list{grid-template-columns:repeat(3,minmax(0,1fr))} }
   .modal-head{display:flex;align-items:center;justify-content:space-between;padding:16px 18px 12px;border-bottom:1px solid var(--line);flex-shrink:0}
   .modal-head h3{margin:0;font-size:17px}
   .modal-x{width:34px;height:34px;border-radius:9px;border:0;background:#F1F5F9;color:#334155;font-size:18px;line-height:1;display:flex;align-items:center;justify-content:center}
@@ -240,7 +269,8 @@ let dataTab="tukang", currentView=null;
 let absDate=null, absMap={}, tempoDate=null;
 let rtChannel=null;
 let dataPayroll=[], gajiTab="slip", payPeriod={mulai:null,selesai:null}, payPreview=null, currentSlip={rows:[],mulai:null,selesai:null};
-let repPeriod={mulai:null,selesai:null}, repTab="tukang", repData=null;
+let repPeriod={mulai:null,selesai:null}, repTab="tukang", repData=null, repMode="bulan", repBulan=null;
+const BLN=["Januari","Februari","Maret","April","Mei","Juni","Juli","Agustus","September","Oktober","November","Desember"];
 
 const $ = id => document.getElementById(id);
 function rupiah(n){ return "Rp " + (Number(n)||0).toLocaleString("id-ID"); }
@@ -1307,20 +1337,32 @@ function pad2(n){ return String(n).padStart(2,"0"); }
 function localDate(dt){ return dt.getFullYear()+"-"+pad2(dt.getMonth()+1)+"-"+pad2(dt.getDate()); }
 function setRP(k,v){ repPeriod[k]=v; }
 function switchRep(t){ repTab=t; renderLaporan(); }
+function applyBulan(){ const y=repBulan.y,m=repBulan.m; repPeriod={mulai:localDate(new Date(y,m,1)),selesai:localDate(new Date(y,m+1,0))}; }
+function geserBulan(d){ let m=repBulan.m+d,y=repBulan.y; if(m<0){m=11;y--;} if(m>11){m=0;y++;} repBulan={y,m}; applyBulan(); renderLaporan(); buildLaporan(); }
+function pilihBulan(){ repBulan={y:+$("rp-thn").value,m:+$("rp-bln").value}; applyBulan(); renderLaporan(); buildLaporan(); }
+function setRepMode(m){ repMode=m; if(m==="bulan"){ applyBulan(); renderLaporan(); buildLaporan(); } else renderLaporan(); }
 function renderLaporan(){
   if(repTab==="log" && me.role!=="owner") repTab="tukang";
-  if(!repPeriod.mulai){ const now=new Date(); repPeriod={mulai:localDate(new Date(now.getFullYear(),now.getMonth(),1)),selesai:localDate(now)}; }
+  if(!repBulan){ const now=new Date(); repBulan={y:now.getFullYear(),m:now.getMonth()}; }
+  if(!repPeriod.mulai) applyBulan();
+  const thisY=new Date().getFullYear();
+  let optY=""; for(let y=thisY-4;y<=thisY+1;y++) optY+=`<option value="${y}" ${y===repBulan.y?"selected":""}>${y}</option>`;
+  const optM=BLN.map((n,i)=>`<option value="${i}" ${i===repBulan.m?"selected":""}>${n}</option>`).join("");
+  const periodUI = repMode==="bulan"
+    ? `<div style="display:flex;gap:8px;align-items:center"><button class="btn ghost" style="flex:0 0 46px;padding:10px 0" onclick="geserBulan(-1)" aria-label="Bulan sebelumnya">◀</button><select id="rp-bln" style="flex:1" onchange="pilihBulan()">${optM}</select><select id="rp-thn" style="flex:0 0 96px" onchange="pilihBulan()">${optY}</select><button class="btn ghost" style="flex:0 0 46px;padding:10px 0" onclick="geserBulan(1)" aria-label="Bulan berikutnya">▶</button></div><div style="font-size:12px;color:var(--muted);margin-top:8px">Periode: ${fmtTgl(repPeriod.mulai)} – ${fmtTgl(repPeriod.selesai)}</div>`
+    : `<div class="field-2"><div class="field"><label>Dari tanggal</label><input id="rp-mulai" type="date" value="${repPeriod.mulai}" onchange="setRP('mulai',this.value)"></div><div class="field"><label>Sampai</label><input id="rp-selesai" type="date" value="${repPeriod.selesai}" onchange="setRP('selesai',this.value)"></div></div><button class="btn primary block" onclick="buildLaporan()">Tampilkan</button>`;
   $("view-laporan").innerHTML=`
     <div class="page-head"><h2>Laporan</h2></div>
     <div class="card" style="margin-bottom:12px">
-      <div class="field-2"><div class="field"><label>Dari tanggal</label><input id="rp-mulai" type="date" value="${repPeriod.mulai}" onchange="setRP('mulai',this.value)"></div><div class="field"><label>Sampai</label><input id="rp-selesai" type="date" value="${repPeriod.selesai}" onchange="setRP('selesai',this.value)"></div></div>
-      <button class="btn primary block" onclick="buildLaporan()">Tampilkan</button>
+      <div class="seg" style="margin-bottom:12px"><button class="${repMode==='bulan'?'on':''}" onclick="setRepMode('bulan')">Per Bulan</button><button class="${repMode==='rentang'?'on':''}" onclick="setRepMode('rentang')">Rentang Tanggal</button></div>
+      ${periodUI}
     </div>
     <div class="seg"><button class="${repTab==='tukang'?'on':''}" onclick="switchRep('tukang')">Tukang</button><button class="${repTab==='supplier'?'on':''}" onclick="switchRep('supplier')">Supplier</button><button class="${repTab==='kasbon'?'on':''}" onclick="switchRep('kasbon')">Kasbon</button><button class="${repTab==='kas'?'on':''}" onclick="switchRep('kas')">Kas</button><button class="${repTab==='owner'?'on':''}" onclick="switchRep('owner')">Kas Owner</button>${me.role==="owner"?`<button class="${repTab==='log'?'on':''}" onclick="switchRep('log')">Log Aktivitas</button>`:""}</div>
     <div id="laporan-body"><div class="empty">Pilih periode lalu tap “Tampilkan”.</div></div>
+    <div class="card" style="margin-top:14px"><div style="font-weight:700;margin-bottom:4px">Export Excel</div><div style="font-size:12.5px;color:var(--muted);margin-bottom:10px">Berisi laporan Tukang, Material &amp; Jasa, dan Kasbon untuk periode yang dipilih di atas.</div><button class="btn primary block" id="btn-xlsx" onclick="exportExcel()">⬇ Export Excel (.xlsx)</button></div>
     <div class="actions" style="margin-top:14px"><button class="btn ghost" onclick="salinLaporan()">Salin ringkasan</button><button class="btn primary" onclick="kirimWaLaporan()">Kirim WA</button></div>
     <button class="btn ghost block" style="margin-top:10px" onclick="backupData()">⬇ Backup semua data (JSON)</button>`;
-  if(repData) renderLaporanBody();
+  if(repData) renderLaporanBody(); else if(repMode==="bulan") buildLaporan();
 }
 async function buildLaporan(){
   const a=repPeriod.mulai, b=repPeriod.selesai;
@@ -1334,7 +1376,7 @@ async function buildLaporan(){
   const { data:bayarAll }=await sb.from("transaksi").select("tukang_id,jumlah").eq("kategori","kasbon").eq("tipe","masuk").eq("status","aktif");
   const { data:dedAll }=await sb.from("payroll_detail").select("tukang_id,kasbon").gt("kasbon",0);
   const logRows = me.role==="owner" ? (await sb.from("log_aktivitas").select("*").gte("waktu",a+"T00:00:00").lte("waktu",b+"T23:59:59").order("waktu",{ascending:false}).limit(300)).data : [];
-  repData={ a,b, details:det, tx:tx||[], prev:prev||[], kasbonAll:kasbonAll||[], bayarAll:bayarAll||[], dedAll:dedAll||[], log:logRows||[] };
+  repData={ a,b, payrolls:pr||[], details:det, tx:tx||[], prev:prev||[], kasbonAll:kasbonAll||[], bayarAll:bayarAll||[], dedAll:dedAll||[], log:logRows||[] };
   renderLaporanBody();
 }
 function renderLaporanBody(){
@@ -1456,6 +1498,119 @@ function laporanText(){
 }
 function kirimWaLaporan(){ const t=laporanText(); if(!t){ toast("Tampilkan laporan dulu","err"); return; } window.open("https://wa.me/?text="+encodeURIComponent(t),"_blank"); }
 async function salinLaporan(){ const t=laporanText(); if(!t){ toast("Tampilkan laporan dulu","err"); return; } try{ await navigator.clipboard.writeText(t); toast("Ringkasan disalin","ok"); }catch(e){ toast("Gagal menyalin","err"); } }
+
+/* ===================== EXPORT EXCEL ===================== */
+function loadExcelJS(){
+  return new Promise((res,rej)=>{
+    if(window.ExcelJS) return res();
+    const sc=document.createElement("script");
+    sc.src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js";
+    sc.onload=()=>res(); sc.onerror=()=>rej(new Error("Gagal memuat library Excel (cek koneksi internet)"));
+    document.head.appendChild(sc);
+  });
+}
+const XL_NAVY="FF0F2A4A";
+function xlSheet(wb,name,title,sub,cols,rows,total){
+  const ws=wb.addWorksheet(name,{views:[{state:"frozen",ySplit:4,showGridLines:false}],pageSetup:{orientation:"landscape",fitToPage:true,fitToWidth:1,fitToHeight:0}});
+  ws.columns=cols.map(c=>({width:c.w||14}));
+  const n=cols.length;
+  ws.mergeCells(1,1,1,n); const t=ws.getCell(1,1); t.value=title; t.font={bold:true,size:15,color:{argb:XL_NAVY}}; ws.getRow(1).height=24;
+  ws.mergeCells(2,1,2,n); const sb=ws.getCell(2,1); sb.value=sub; sb.font={size:10.5,color:{argb:"FF64748B"}};
+  const hr=ws.getRow(4); hr.height=22;
+  cols.forEach((c,i)=>{ const cell=hr.getCell(i+1); cell.value=c.h; cell.font={bold:true,color:{argb:"FFFFFFFF"}}; cell.fill={type:"pattern",pattern:"solid",fgColor:{argb:XL_NAVY}}; cell.alignment={vertical:"middle",horizontal:c.num?"right":"left",wrapText:true}; });
+  const thin={style:"thin",color:{argb:"FFD5DDE8"}}; const bd={top:thin,bottom:thin,left:thin,right:thin};
+  rows.forEach((r,ri)=>{
+    const row=ws.getRow(5+ri);
+    cols.forEach((c,i)=>{ const cell=row.getCell(i+1); let v=r[i]; cell.value=(v===undefined||v===null)?"":v; cell.border=bd; cell.alignment={vertical:"top",horizontal:c.num?"right":"left",wrapText:!c.num};
+      if(c.num) cell.numFmt=c.fmt||"#,##0"; if(ri%2===1) cell.fill={type:"pattern",pattern:"solid",fgColor:{argb:"FFF4F7FB"}}; });
+  });
+  if(!rows.length){ ws.mergeCells(5,1,5,n); const e=ws.getCell(5,1); e.value="Tidak ada data pada periode ini."; e.font={italic:true,color:{argb:"FF94A3B8"}}; }
+  else if(total){
+    const tr=ws.getRow(5+rows.length);
+    cols.forEach((c,i)=>{ const cell=tr.getCell(i+1); cell.value=total[i]===undefined?"":total[i]; cell.font={bold:true}; cell.border={top:{style:"medium",color:{argb:XL_NAVY}},bottom:bd.bottom}; cell.fill={type:"pattern",pattern:"solid",fgColor:{argb:"FFE8F0FA"}}; cell.alignment={horizontal:c.num?"right":"left"}; if(c.num) cell.numFmt=c.fmt||"#,##0"; });
+  }
+  ws.autoFilter={from:{row:4,column:1},to:{row:4,column:n}};
+  return ws;
+}
+function xlTukang(wb,sub){
+  const det=repData.details||[]; const pmap={}; (repData.payrolls||[]).forEach(p=>pmap[p.id]=p);
+  const map={};
+  det.forEach(d=>{ const k=d.tukang_id||d.nama; const m=map[k]||(map[k]={nama:d.nama,hp:0,hs:0,dasar:0,lembur:0,tambah:0,kasbon:0,bersih:0});
+    m.hp+=Number(d.hari_penuh)||0; m.hs+=Number(d.hari_setengah)||0; m.dasar+=Number(d.upah_dasar)||0; m.lembur+=Number(d.lembur)||0; m.tambah+=Number(d.tambahan)||0; m.kasbon+=Number(d.kasbon)||0; m.bersih+=Number(d.gaji_bersih)||0; });
+  const rows=Object.values(map).sort((a,b)=>(a.nama||"").localeCompare(b.nama||""));
+  const cols=[{h:"No",w:6},{h:"Nama Tukang",w:30},{h:"Hari Penuh",w:12,num:1,fmt:"#,##0.0"},{h:"Setengah Hari",w:14,num:1,fmt:"#,##0.0"},{h:"Upah Dasar (Rp)",w:18,num:1},{h:"Lembur (Rp)",w:16,num:1},{h:"Uang Tambahan (Rp)",w:19,num:1},{h:"Total Bruto (Rp)",w:18,num:1},{h:"Potong Kasbon (Rp)",w:19,num:1},{h:"Dibayar Bersih (Rp)",w:19,num:1}];
+  const T=Array(10).fill(0); const out=rows.map((r,i)=>{ const br=r.dasar+r.lembur+r.tambah; const v=[i+1,r.nama,r.hp,r.hs,r.dasar,r.lembur,r.tambah,br,r.kasbon,r.bersih]; for(let j=2;j<10;j++)T[j]+=v[j]; return v; });
+  xlSheet(wb,"Tukang (Ringkasan)","LAPORAN UPAH TUKANG – RINGKASAN",sub,cols,out,["","TOTAL",...T.slice(2)]);
+  // detail per slip
+  const dr=det.map(d=>{ const p=pmap[d.payroll_id]||{}; const br=(Number(d.upah_dasar)||0)+(Number(d.lembur)||0)+(Number(d.tambahan)||0); return [p.periode_mulai?fmtTgl(p.periode_mulai):"",p.periode_selesai?fmtTgl(p.periode_selesai):"",d.nama,Number(d.tarif_harian)||0,Number(d.hari_penuh)||0,Number(d.hari_setengah)||0,Number(d.upah_dasar)||0,Number(d.lembur)||0,Number(d.tambahan)||0,br,Number(d.kasbon)||0,Number(d.gaji_bersih)||0,p.periode_selesai||""]; })
+    .sort((a,b)=>(a[12]||"").localeCompare(b[12]||"")||(a[2]||"").localeCompare(b[2]||""));
+  const c2=[{h:"Minggu Mulai",w:14},{h:"Minggu Selesai",w:14},{h:"Nama Tukang",w:28},{h:"Tarif Harian",w:14,num:1},{h:"Hari Penuh",w:11,num:1,fmt:"#,##0.0"},{h:"Setengah Hari",w:13,num:1,fmt:"#,##0.0"},{h:"Upah Dasar",w:15,num:1},{h:"Lembur",w:13,num:1},{h:"Tambahan",w:13,num:1},{h:"Bruto",w:15,num:1},{h:"Potong Kasbon",w:15,num:1},{h:"Dibayar Bersih",w:15,num:1}];
+  const T2=Array(12).fill(0); dr.forEach(r=>{ for(let j=6;j<12;j++)T2[j]+=r[j]; });
+  xlSheet(wb,"Tukang (Per Slip)","LAPORAN UPAH TUKANG – RINCIAN PER SLIP MINGGUAN",sub,c2,dr.map(r=>r.slice(0,12)),["","","TOTAL","","","",...T2.slice(6)]);
+}
+function xlMaterial(wb,sub){
+  const mat=repData.tx.filter(t=>(t.kategori==="material"||t.kategori==="jasa")&&t.status==="aktif");
+  const map={}; mat.forEach(t=>{ const k=t.supplier_id||"-"; const m=map[k]||(map[k]={nama:t.supplier_id?namaSupplier(t.supplier_id):"(tanpa supplier)",mat:0,jasa:0,n:0}); if(t.kategori==="jasa")m.jasa+=Number(t.jumlah)||0; else m.mat+=Number(t.jumlah)||0; m.n++; });
+  const rows=Object.values(map).sort((a,b)=>(b.mat+b.jasa)-(a.mat+a.jasa));
+  const cols=[{h:"No",w:6},{h:"Supplier / Penyedia",w:32},{h:"Jumlah Transaksi",w:16,num:1},{h:"Material (Rp)",w:18,num:1},{h:"Jasa (Rp)",w:18,num:1},{h:"Total (Rp)",w:19,num:1}];
+  const T=[0,0,0,0]; const out=rows.map((r,i)=>{ T[0]+=r.n;T[1]+=r.mat;T[2]+=r.jasa;T[3]+=r.mat+r.jasa; return [i+1,r.nama,r.n,r.mat,r.jasa,r.mat+r.jasa]; });
+  xlSheet(wb,"Material & Jasa (Supplier)","LAPORAN MATERIAL & JASA – PER SUPPLIER",sub+"  ·  dihitung berdasarkan tanggal pembayaran",cols,out,["","TOTAL",...T]);
+  const det=mat.slice().sort((a,b)=>(a.tanggal||"").localeCompare(b.tanggal||""));
+  const akunNm=a=>({tunai:"Kas Tunai",rekening:"Rekening",owner:"Kas Owner"}[a]||a||"");
+  const c2=[{h:"Tanggal",w:14},{h:"Supplier / Penyedia",w:30},{h:"Jenis",w:11},{h:"Dibayar dari",w:14},{h:"Keterangan",w:44},{h:"Jumlah (Rp)",w:18,num:1}];
+  let tot=0; const r2=det.map(t=>{ tot+=Number(t.jumlah)||0; return [fmtTgl(t.tanggal),t.supplier_id?namaSupplier(t.supplier_id):"(tanpa supplier)",t.kategori==="jasa"?"Jasa":"Material",akunNm(t.akun),t.keterangan||"",Number(t.jumlah)||0]; });
+  xlSheet(wb,"Material & Jasa (Detail)","LAPORAN MATERIAL & JASA – RINCIAN TRANSAKSI",sub,c2,r2,["","","","","TOTAL",tot]);
+}
+function xlKasbon(wb,sub){
+  const ambil=repData.tx.filter(t=>t.kategori==="kasbon"&&t.tipe==="keluar"&&t.status==="aktif");
+  const bayar=repData.tx.filter(t=>t.kategori==="kasbon"&&t.tipe==="masuk"&&t.status==="aktif");
+  const pmap={}; (repData.payrolls||[]).forEach(p=>pmap[p.id]=p);
+  const out={};
+  (repData.kasbonAll||[]).forEach(t=>{ if(t.tukang_id) out[t.tukang_id]=(out[t.tukang_id]||0)+(Number(t.jumlah)||0); });
+  (repData.bayarAll||[]).forEach(t=>{ if(t.tukang_id) out[t.tukang_id]=(out[t.tukang_id]||0)-(Number(t.jumlah)||0); });
+  (repData.dedAll||[]).forEach(d=>{ if(d.tukang_id) out[d.tukang_id]=(out[d.tukang_id]||0)-(Number(d.kasbon)||0); });
+  const map={}; const G=k=>map[k]||(map[k]={nama:k!=="-"?namaTukang(k):"(tanpa tukang)",ambil:0,bayar:0,potong:0,sisa:0});
+  ambil.forEach(t=>{ G(t.tukang_id||"-").ambil+=Number(t.jumlah)||0; });
+  bayar.forEach(t=>{ G(t.tukang_id||"-").bayar+=Number(t.jumlah)||0; });
+  (repData.details||[]).forEach(d=>{ if(d.tukang_id&&Number(d.kasbon)>0) G(d.tukang_id).potong+=Number(d.kasbon)||0; });
+  Object.keys(out).forEach(k=>{ if(out[k]>0) G(k).sisa=Math.round(out[k]); });
+  const rows=Object.values(map).sort((a,b)=>b.sisa-a.sisa||b.ambil-a.ambil);
+  const cols=[{h:"No",w:6},{h:"Nama Tukang",w:30},{h:"Kasbon Diambil (Rp)",w:21,num:1},{h:"Dibayar Tunai/Transfer (Rp)",w:26,num:1},{h:"Dipotong dari Gaji (Rp)",w:23,num:1},{h:"Sisa Hutang Saat Ini (Rp)",w:25,num:1},{h:"Status",w:11}];
+  const T=[0,0,0,0]; const o=rows.map((r,i)=>{ T[0]+=r.ambil;T[1]+=r.bayar;T[2]+=r.potong;T[3]+=r.sisa; return [i+1,r.nama,r.ambil,r.bayar,r.potong,r.sisa,r.sisa?"Belum lunas":"Lunas"]; });
+  xlSheet(wb,"Kasbon (Ringkasan)","LAPORAN KASBON TUKANG – RINGKASAN",sub+"  ·  'Sisa hutang' = total kasbon yang belum lunas per hari ini (semua waktu)",cols,o,["","TOTAL",...T,""]);
+  const det=[]; ambil.forEach(t=>det.push([t.tanggal,fmtTgl(t.tanggal),t.tukang_id?namaTukang(t.tukang_id):"-","Kasbon diambil",t.keterangan||"",Number(t.jumlah)||0]));
+  bayar.forEach(t=>det.push([t.tanggal,fmtTgl(t.tanggal),t.tukang_id?namaTukang(t.tukang_id):"-","Bayar kasbon",t.keterangan||"",-(Number(t.jumlah)||0)]));
+  (repData.details||[]).forEach(d=>{ if(Number(d.kasbon)>0){ const p=pmap[d.payroll_id]||{}; det.push([p.periode_selesai||"",p.periode_selesai?fmtTgl(p.periode_selesai):"",d.nama,"Potong gaji","Slip minggu "+(p.periode_mulai?fmtTgl(p.periode_mulai):"")+" – "+(p.periode_selesai?fmtTgl(p.periode_selesai):""),-(Number(d.kasbon)||0)]); } });
+  det.sort((a,b)=>(a[0]||"").localeCompare(b[0]||""));
+  const c2=[{h:"Tanggal",w:14},{h:"Nama Tukang",w:30},{h:"Jenis",w:17},{h:"Keterangan",w:46},{h:"Jumlah (Rp)  [+ ambil, – bayar/potong]",w:30,num:1}];
+  const net=det.reduce((a,r)=>a+r[5],0);
+  xlSheet(wb,"Kasbon (Detail)","LAPORAN KASBON TUKANG – RINCIAN TRANSAKSI",sub,c2,det.map(r=>[r[1],r[2],r[3],r[4],r[5]]),["","","","SELISIH BERSIH PERIODE",net]);
+}
+function bufToBase64(buf){ const u=new Uint8Array(buf); let bin=""; const ch=0x8000; for(let i=0;i<u.length;i+=ch) bin+=String.fromCharCode.apply(null,u.subarray(i,i+ch)); return btoa(bin); }
+async function exportExcel(){
+  const btn=$("btn-xlsx"); if(btn){ btn.disabled=true; btn.textContent="Menyiapkan Excel…"; }
+  try{
+    if(!repPeriod.mulai||!repPeriod.selesai||repPeriod.mulai>repPeriod.selesai){ toast("Periode tidak valid","err"); return; }
+    await buildLaporan();
+    if(!repData){ toast("Gagal memuat data laporan","err"); return; }
+    await loadExcelJS();
+    const wb=new ExcelJS.Workbook(); wb.creator="Proyek AA"; wb.created=new Date();
+    const sub="Periode: "+fmtTgl(repData.a)+" s/d "+fmtTgl(repData.b)+"  ·  Dicetak: "+fmtTgl(todayStr());
+    xlTukang(wb,sub); xlMaterial(wb,sub); xlKasbon(wb,sub);
+    const buf=await wb.xlsx.writeBuffer();
+    const fname="laporan-proyek-"+repData.a+"_sd_"+repData.b+".xlsx";
+    const AB=window.AndroidBridge;
+    if(AB){
+      if(typeof AB.saveBase64==="function"){ AB.saveBase64(fname, bufToBase64(buf), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"); }
+      else { toast("Export Excel di HP butuh update aplikasi (APK). Sementara, buka lewat browser/PC.","err"); }
+      return;
+    }
+    const blob=new Blob([buf],{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"});
+    const url=URL.createObjectURL(blob); const a=document.createElement("a"); a.href=url; a.download=fname; document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(url),4000);
+    toast("Excel diunduh: "+fname,"ok");
+  }catch(e){ console.log(e); toast("Gagal export: "+(e.message||e),"err"); }
+  finally{ if(btn){ btn.disabled=false; btn.textContent="⬇ Export Excel (.xlsx)"; } }
+}
 async function backupData(){
   toast("Menyiapkan backup…","ok");
   const tables=["pengguna","tukang","supplier","absensi","gaji_komponen","pembelian","transaksi","payroll","payroll_detail","permintaan"];
