@@ -969,13 +969,14 @@ const BL_HEAD=`<div class="bl-head"><div>Tanggal</div><div>Supplier</div><div st
 function beliRow(p,mode){
   const sup=p.supplier_id?namaSupplier(p.supplier_id):"-";
   const paid=paidOf(p), sisa=sisaOf(p), lunas=isLunas(p);
-  const sub=p.harga_satuan? `${p.qty||0} ${esc(p.satuan||"")} × ${rupiah(p.harga_satuan)}` : `${p.qty||0} ${esc(p.satuan||"")}`;
+  const sub=p.harga_satuan? `${p.qty||0} ${esc(p.satuan||"")} × ${rupiah(p.harga_satuan)}` : (p.qty?`${p.qty} ${esc(p.satuan||"")}`:"");
   const isMgr=(me.role==="manager"||me.role==="owner");
   let totSub="";
   if(p.status==="disetujui"||lunas){ if(lunas&&paid>0) totSub=`<div class="bl-sub" style="color:var(--pos)">lunas</div>`; else if(paid>0) totSub=`<div class="bl-sub">dibayar ${rupiah(paid)}<br><b class="due">sisa ${rupiah(sisa)}</b></div>`; }
   let act="";
   if(mode==="proses") act=`<button class="btn ghost sm" onclick="openHapusBarang('${p.id}')">Hapus</button><button class="btn primary sm" onclick="openProses('${p.id}')">Proses</button>`;
   else if(mode==="bayar") act=`<button class="btn ghost sm" onclick="openDetailBeli('${p.id}')">Detail</button><button class="btn primary sm" onclick="openBayar('${p.id}')">Bayar</button>`;
+  else if(mode==="laporan") act="";
   else { act=`<button class="btn ghost sm" onclick="openDetailBeli('${p.id}')">Detail</button>`; if(p.status==="disetujui"&&!lunas&&sisa>0&&me.role!=="security") act+=`<button class="btn primary sm" onclick="openBayar('${p.id}')">Bayar</button>`; }
   const extra=(p.status==="ditolak"&&p.alasan_tolak?`<div class="bl-meta" style="color:var(--neg)">Alasan: ${esc(p.alasan_tolak)}</div>`:"")+(p.status==="dibatalkan"&&p.alasan_batal?`<div class="bl-meta">Alasan dibatalkan: ${esc(p.alasan_batal)}</div>`:"");
   return `<div class="bl ${p.status==='dibatalkan'?'bl-off':''}"><div class="c-tgl">${fmtTgl(beliTgl(p))}</div><div class="c-sup">${esc(sup)}</div><div class="c-tot"><div class="tnum bl-total">${rupiah(p.total)}</div>${totSub}</div><div class="c-desc"><div class="bl-item">${esc(p.item)}</div><div class="bl-meta">${p.jenis==='jasa'?'Jasa · ':''}${sub}${tempoStr(p)}${danaStr(p)}</div>${extra}</div><div class="c-stat">${beliBadge(p)}</div><div class="c-act">${act}</div></div>`;
@@ -1560,7 +1561,15 @@ async function buildLaporan(){
   const { data:bayarAll }=await sb.from("transaksi").select("tukang_id,jumlah").eq("kategori","kasbon").eq("tipe","masuk").eq("status","aktif");
   const { data:dedAll }=await sb.from("payroll_detail").select("tukang_id,kasbon").gt("kasbon",0);
   const logRows = me.role==="owner" ? (await sb.from("log_aktivitas").select("*").gte("waktu",a+"T00:00:00").lte("waktu",b+"T23:59:59").order("waktu",{ascending:false}).limit(300)).data : [];
-  repData={ a,b, payrolls:pr||[], details:det, tx:tx||[], prev:prev||[], kasbonAll:kasbonAll||[], bayarAll:bayarAll||[], dedAll:dedAll||[], log:logRows||[] };
+  const [beliAll, payAll]=await Promise.all([
+    fetchAllRows("pembelian","*","created_at",q=>q.eq("status","disetujui")),
+    fetchAllRows("transaksi","id,pembelian_id,jumlah,tanggal,akun,created_at","created_at",q=>q.eq("status","aktif").not("pembelian_id","is",null))
+  ]);
+  bayarMap={}; (payAll||[]).forEach(t=>{ (bayarMap[t.pembelian_id]=bayarMap[t.pembelian_id]||[]).push(t); });
+  const beliRows=(beliAll||[]).filter(x=>{ const d=beliTgl(x); return d>=a&&d<=b; });
+  const orphan=(tx||[]).filter(t=>(t.kategori==="material"||t.kategori==="jasa")&&t.status==="aktif"&&!t.pembelian_id).map(t=>{ const id="tx-"+t.id; bayarMap[id]=[{jumlah:t.jumlah,tanggal:t.tanggal,akun:t.akun}]; return {id,item:t.keterangan||"(pembayaran tanpa catatan pembelian)",supplier_id:t.supplier_id,total:Number(t.jumlah)||0,qty:0,satuan:"",harga_satuan:0,status:"disetujui",sudah_dibayar:true,sudah_datang:true,jenis:t.kategori==="jasa"?"jasa":"barang",tgl_pengajuan:t.tanggal}; });
+  const beli=[...beliRows,...orphan].sort((x,y)=>beliTgl(y).localeCompare(beliTgl(x)));
+  repData={ a,b, beli, payrolls:pr||[], details:det, tx:tx||[], prev:prev||[], kasbonAll:kasbonAll||[], bayarAll:bayarAll||[], dedAll:dedAll||[], log:logRows||[] };
   renderLaporanBody();
 }
 function renderLaporanBody(){
@@ -1578,15 +1587,25 @@ function repTukang(){
   const body=rows.map(r=>{ tB+=r.bruto;tK+=r.kasbon;tN+=r.bersih; return `<div class="tx"><div class="l"><div class="k">${esc(r.nama)}</div><div class="d">Kasbon ${rupiah(r.kasbon)} · bersih ${rupiah(r.bersih)}</div></div><div class="r"><div class="a tnum">${rupiah(r.bruto)}</div></div></div>`; }).join("");
   return `<div class="bigtotal"><div class="l">TOTAL UPAH TUKANG (BRUTO)</div><div class="v tnum">${rupiah(tB)}</div><div class="s">Kasbon ${rupiah(tK)} · dibayar bersih ${rupiah(tN)}</div></div><div class="list" style="margin-top:8px">${body}</div>`;
 }
+function paidEff(p){ return isLunas(p)?(Number(p.total)||0):Math.min(paidOf(p),Number(p.total)||0); }
+function supplierAgg(){
+  const map={}; const G=k=>map[k]||(map[k]={nama:k!=="-"?namaSupplier(k):"(tanpa supplier)",n:0,total:0,paid:0,sisa:0,kas:0});
+  (repData.beli||[]).forEach(p=>{ const g=G(p.supplier_id||"-"); g.n++; g.total+=Number(p.total)||0; g.paid+=paidEff(p); g.sisa+=sisaOf(p); });
+  repData.tx.filter(t=>(t.kategori==="material"||t.kategori==="jasa")&&t.status==="aktif").forEach(t=>{ G(t.supplier_id||"-").kas+=Number(t.jumlah)||0; });
+  const rows=Object.values(map).sort((a,b)=>b.total-a.total||b.kas-a.kas);
+  const T=rows.reduce((o,r)=>({n:o.n+r.n,total:o.total+r.total,paid:o.paid+r.paid,sisa:o.sisa+r.sisa,kas:o.kas+r.kas}),{n:0,total:0,paid:0,sisa:0,kas:0});
+  return {rows,T};
+}
 function repSupplier(){
-  const mat=repData.tx.filter(t=>(t.kategori==="material"||t.kategori==="jasa")&&t.status==="aktif");
-  if(!mat.length) return `<div class="empty">Belum ada pembelian material/jasa pada periode ini.</div>`;
-  const map={};
-  mat.forEach(t=>{ const k=t.supplier_id||"-"; if(!map[k])map[k]={nama:t.supplier_id?namaSupplier(t.supplier_id):"(tanpa supplier)",total:0,n:0}; map[k].total+=Number(t.jumlah)||0; map[k].n++; });
-  const rows=Object.values(map).sort((a,b)=>b.total-a.total);
-  let grand=0;
-  const body=rows.map(r=>{ grand+=r.total; return `<div class="tx"><div class="l"><div class="k">${esc(r.nama)}</div><div class="d">${r.n} transaksi</div></div><div class="r"><div class="a tnum">${rupiah(r.total)}</div></div></div>`; }).join("");
-  return `<div class="bigtotal"><div class="l">TOTAL MATERIAL & JASA</div><div class="v tnum">${rupiah(grand)}</div><div class="s">${rows.length} supplier</div></div><div class="list" style="margin-top:8px">${body}</div>`;
+  const { rows, T }=supplierAgg();
+  if(!rows.length) return `<div class="empty">Belum ada pembelian material/jasa pada periode ini.</div>`;
+  const sum=`<div class="rw-sum"><div><div class="lbl">Total pembelian (${T.n} nota)</div><div class="v tnum">${rupiah(T.total)}</div></div><div><div class="lbl">Sudah dibayar</div><div class="v tnum" style="color:var(--pos)">${rupiah(T.paid)}</div></div><div><div class="lbl">Sisa hutang</div><div class="v tnum" style="color:${T.sisa?'var(--neg)':'var(--pos)'}">${rupiah(T.sisa)}</div></div><div><div class="lbl">Kas keluar periode ini</div><div class="v tnum">${rupiah(T.kas)}</div></div></div>`;
+  const ringkas=rows.map(r=>`<div class="tx"><div class="l"><div class="k">${esc(r.nama)}</div><div class="d">${r.n} nota · dibayar ${rupiah(r.paid)}${r.sisa?` · <b class="due">sisa ${rupiah(r.sisa)}</b>`:" · lunas"}${r.kas?` · kas keluar ${rupiah(r.kas)}`:""}</div></div><div class="r"><div class="a tnum">${rupiah(r.total)}</div></div></div>`).join("");
+  const riwayat=(repData.beli||[]);
+  return `${sum}<h4 class="sec">Ringkasan per supplier</h4><div class="list">${ringkas}</div>
+    <h4 class="sec">Riwayat pembelian (${riwayat.length})</h4>
+    <div class="list bl-list">${riwayat.length?BL_HEAD+riwayat.map(p=>beliRow(p,"laporan")).join(""):'<div class="empty">Tidak ada pembelian pada periode ini.</div>'}</div>
+    <p style="font-size:12px;color:var(--muted);margin:10px 2px 0">Dihitung berdasarkan <b>tanggal pembelian/nota</b>. “Kas keluar periode ini” = pembayaran yang dicatat pada rentang tanggal terpilih (bisa untuk nota bulan lain).</p>`;
 }
 function repTxLine(t){
   const nm=t.tukang_id?namaTukang(t.tukang_id):(t.supplier_id?namaSupplier(t.supplier_id):"");
@@ -1672,12 +1691,11 @@ function repKas(){
 function laporanText(){
   if(!repData) return "";
   let bruto=0; repData.details.forEach(d=>{ bruto+=(Number(d.upah_dasar)||0)+(Number(d.lembur)||0)+(Number(d.tambahan)||0); });
-  const mat=repData.tx.filter(t=>(t.kategori==="material"||t.kategori==="jasa")&&t.status==="aktif");
-  const supMap={}; let matTotal=0; mat.forEach(t=>{ const k=t.supplier_id||"-"; supMap[k]=(supMap[k]||0)+(Number(t.jumlah)||0); matTotal+=Number(t.jumlah)||0; });
-  const L=["*LAPORAN PENGELUARAN*","Proyek Tukang","Periode: "+fmtTgl(repData.a)+" - "+fmtTgl(repData.b),"","UPAH TUKANG: "+rupiah(bruto),"","MATERIAL & JASA:"];
-  const keys=Object.keys(supMap); if(!keys.length) L.push("- (tidak ada)");
-  keys.forEach(k=>{ L.push("- "+(k!=="-"?namaSupplier(k):"(tanpa supplier)")+": "+rupiah(supMap[k])); });
-  L.push("Subtotal material & jasa: "+rupiah(matTotal),"","*TOTAL: "+rupiah(bruto+matTotal)+"*");
+  const { rows:sr, T:sT }=supplierAgg(); const matTotal=sT.total;
+  const L=["*LAPORAN PENGELUARAN*","Proyek Tukang","Periode: "+fmtTgl(repData.a)+" - "+fmtTgl(repData.b),"","UPAH TUKANG: "+rupiah(bruto),"","MATERIAL & JASA (per nota):"];
+  if(!sr.length) L.push("- (tidak ada)");
+  sr.forEach(r=>{ L.push("- "+r.nama+": "+rupiah(r.total)+(r.sisa?" (sisa hutang "+rupiah(r.sisa)+")":"")); });
+  L.push("Subtotal material & jasa: "+rupiah(matTotal),sT.sisa?("Belum dibayar: "+rupiah(sT.sisa)):"","*TOTAL: "+rupiah(bruto+matTotal)+"*");
   return L.join("\n");
 }
 function kirimWaLaporan(){ const t=laporanText(); if(!t){ toast("Tampilkan laporan dulu","err"); return; } window.open("https://wa.me/?text="+encodeURIComponent(t),"_blank"); }
@@ -1733,17 +1751,23 @@ function xlTukang(wb,sub){
   xlSheet(wb,"Tukang (Per Slip)","LAPORAN UPAH TUKANG – RINCIAN PER SLIP MINGGUAN",sub,c2,dr.map(r=>r.slice(0,12)),["","","TOTAL","","","",...T2.slice(6)]);
 }
 function xlMaterial(wb,sub){
-  const mat=repData.tx.filter(t=>(t.kategori==="material"||t.kategori==="jasa")&&t.status==="aktif");
-  const map={}; mat.forEach(t=>{ const k=t.supplier_id||"-"; const m=map[k]||(map[k]={nama:t.supplier_id?namaSupplier(t.supplier_id):"(tanpa supplier)",mat:0,jasa:0,n:0}); if(t.kategori==="jasa")m.jasa+=Number(t.jumlah)||0; else m.mat+=Number(t.jumlah)||0; m.n++; });
-  const rows=Object.values(map).sort((a,b)=>(b.mat+b.jasa)-(a.mat+a.jasa));
-  const cols=[{h:"No",w:6},{h:"Supplier / Penyedia",w:32},{h:"Jumlah Transaksi",w:16,num:1},{h:"Material (Rp)",w:18,num:1},{h:"Jasa (Rp)",w:18,num:1},{h:"Total (Rp)",w:19,num:1}];
-  const T=[0,0,0,0]; const out=rows.map((r,i)=>{ T[0]+=r.n;T[1]+=r.mat;T[2]+=r.jasa;T[3]+=r.mat+r.jasa; return [i+1,r.nama,r.n,r.mat,r.jasa,r.mat+r.jasa]; });
-  xlSheet(wb,"Material & Jasa (Supplier)","LAPORAN MATERIAL & JASA – PER SUPPLIER",sub+"  ·  dihitung berdasarkan tanggal pembayaran",cols,out,["","TOTAL",...T]);
-  const det=mat.slice().sort((a,b)=>(a.tanggal||"").localeCompare(b.tanggal||""));
+  const { rows, T }=supplierAgg();
+  const cols=[{h:"No",w:6},{h:"Supplier / Penyedia",w:32},{h:"Jumlah Nota",w:13,num:1},{h:"Total Pembelian (Rp)",w:21,num:1},{h:"Sudah Dibayar (Rp)",w:20,num:1},{h:"Sisa Hutang (Rp)",w:19,num:1},{h:"Kas Keluar Periode (Rp)",w:23,num:1}];
+  const out=rows.map((r,i)=>[i+1,r.nama,r.n,r.total,r.paid,r.sisa,r.kas]);
+  xlSheet(wb,"Material & Jasa (Supplier)","LAPORAN MATERIAL & JASA – PER SUPPLIER",sub+"  ·  berdasarkan tanggal nota; 'Kas keluar' = pembayaran pada periode ini",cols,out,["","TOTAL",T.n,T.total,T.paid,T.sisa,T.kas]);
+  // riwayat pembelian: tanggal, supplier, total, deskripsi
+  const list=(repData.beli||[]).slice().sort((a,b)=>beliTgl(a).localeCompare(beliTgl(b)));
+  const stat=p=>isLunas(p)?"Lunas":(paidOf(p)>0?"Dibayar sebagian":"Belum dibayar");
+  const desc=p=>{ const q=p.harga_satuan?`${p.qty||0} ${p.satuan||""} × Rp ${Number(p.harga_satuan).toLocaleString("id-ID")}`:(p.qty?`${p.qty} ${p.satuan||""}`:""); return [p.item,q].filter(Boolean).join(" — "); };
+  const c2=[{h:"Tanggal",w:14},{h:"Supplier / Penyedia",w:28},{h:"Total (Rp)",w:18,num:1},{h:"Deskripsi",w:46},{h:"Jenis",w:10},{h:"Jatuh Tempo",w:14},{h:"Dibayar (Rp)",w:17,num:1},{h:"Sisa (Rp)",w:17,num:1},{h:"Status",w:17}];
+  const r2=list.map(p=>[fmtTgl(beliTgl(p)),p.supplier_id?namaSupplier(p.supplier_id):"(tanpa supplier)",Number(p.total)||0,desc(p),p.jenis==="jasa"?"Jasa":"Material",p.jatuh_tempo?fmtTgl(p.jatuh_tempo):"",paidEff(p),sisaOf(p),stat(p)]);
+  xlSheet(wb,"Material & Jasa (Riwayat)","RIWAYAT PEMBELIAN MATERIAL & JASA",sub,c2,r2,["","TOTAL",T.total,"","","",T.paid,T.sisa,""]);
+  // pembayaran (kas keluar) pada periode
+  const mat=repData.tx.filter(t=>(t.kategori==="material"||t.kategori==="jasa")&&t.status==="aktif").sort((a,b)=>(a.tanggal||"").localeCompare(b.tanggal||""));
   const akunNm=a=>({tunai:"Kas Tunai",rekening:"Rekening",owner:"Kas Owner"}[a]||a||"");
-  const c2=[{h:"Tanggal",w:14},{h:"Supplier / Penyedia",w:30},{h:"Jenis",w:11},{h:"Dibayar dari",w:14},{h:"Keterangan",w:44},{h:"Jumlah (Rp)",w:18,num:1}];
-  let tot=0; const r2=det.map(t=>{ tot+=Number(t.jumlah)||0; return [fmtTgl(t.tanggal),t.supplier_id?namaSupplier(t.supplier_id):"(tanpa supplier)",t.kategori==="jasa"?"Jasa":"Material",akunNm(t.akun),t.keterangan||"",Number(t.jumlah)||0]; });
-  xlSheet(wb,"Material & Jasa (Detail)","LAPORAN MATERIAL & JASA – RINCIAN TRANSAKSI",sub,c2,r2,["","","","","TOTAL",tot]);
+  const c3=[{h:"Tanggal Bayar",w:15},{h:"Supplier / Penyedia",w:30},{h:"Jenis",w:11},{h:"Dibayar dari",w:14},{h:"Keterangan",w:44},{h:"Jumlah (Rp)",w:18,num:1}];
+  let tot=0; const r3=mat.map(t=>{ tot+=Number(t.jumlah)||0; return [fmtTgl(t.tanggal),t.supplier_id?namaSupplier(t.supplier_id):"(tanpa supplier)",t.kategori==="jasa"?"Jasa":"Material",akunNm(t.akun),t.keterangan||"",Number(t.jumlah)||0]; });
+  xlSheet(wb,"Material & Jasa (Bayar)","PEMBAYARAN MATERIAL & JASA (KAS KELUAR)",sub,c3,r3,["","","","","TOTAL",tot]);
 }
 function xlKasbon(wb,sub){
   const ambil=repData.tx.filter(t=>t.kategori==="kasbon"&&t.tipe==="keluar"&&t.status==="aktif");
